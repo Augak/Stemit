@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(16), dp(16), dp(16), dp(16))
             addView(title("2  Separate", 20f))
             addView(body("Real on-device separation using ONNX Runtime. The first run downloads the model; later runs can work offline."))
-            val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            val progress = ProgressBar(this@MainActivity, null, android.R.attr.progressBarStyleHorizontal).apply {
                 max = 1000
                 progress = 0
                 visibility = View.GONE
