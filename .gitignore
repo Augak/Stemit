@@ -1,0 +1,98 @@
+# Android / Gradle build output
+.gradle/
+**/build/
+**/.gradle/
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+.kotlin/
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# APKs and generated packages
+*.apk
+*.aab
+*.ap_
+*.dex
+output-metadata.json
+
+# Signing keys and credentials (never commit these)
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+.env
+.env.*
+!.env.example
+secrets.properties
+
+# AI model weights and downloaded checkpoints
+*.onnx
+*.onnx.data
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.tflite
+*.pb
+*.model
+*.weights
+models/
+model_cache/
+weights/
+checkpoints/
+.ai-cache/
+
+# Temporary and generated audio
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+*.wma
+*.aiff
+*.aif
+*.pcm
+*.raw
+*.tmp
+*.part
+output/
+outputs/
+temp/
+tmp/
+cache/
+exports/
+processed/
+separated/
+recordings/
+
+# Logs, crash dumps and profiling
+*.log
+logs/
+*.hprof
+*.trace
+*.prof
+*.dump
+hs_err_pid*
+replay_pid*
+
+# Test / report artifacts
+test-results/
+reports/
+screenshots/
+
+# OS / editor clutter
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+*.bak
