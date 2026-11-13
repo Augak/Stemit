@@ -33,9 +33,10 @@ class StereoAudio(
 class AudioDecoder(private val context: Context) {
     fun decode(uri: Uri): StereoAudio {
         val extractor = MediaExtractor()
-        context.contentResolver.openFileDescriptor(uri, "r")?.use {
-            extractor.setDataSource(it.fileDescriptor)
-        } ?: error("Unable to open audio file")
+        // Keep the descriptor open until MediaExtractor has finished reading the track.
+        val descriptor = context.contentResolver.openFileDescriptor(uri, "r")
+            ?: error("Unable to open audio file")
+        extractor.setDataSource(descriptor.fileDescriptor)
 
         var track = -1
         for (i in 0 until extractor.trackCount) {
@@ -109,6 +110,7 @@ class AudioDecoder(private val context: Context) {
             try { codec.stop() } catch (_: Exception) {}
             codec.release()
             extractor.release()
+            descriptor.close()
         }
 
         require(left.isNotEmpty()) { "Audio decoder returned no samples" }
