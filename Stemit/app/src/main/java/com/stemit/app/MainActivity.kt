@@ -320,7 +320,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun checkForUpdates() {
-        showInfo("Checking for updates", "Checking the official Stemit release page…")
+        Toast.makeText(this, "Checking for Stemit updates…", Toast.LENGTH_SHORT).show()
         executor.execute {
             var connection: HttpURLConnection? = null
             try {
