@@ -152,7 +152,8 @@ class MainActivity : AppCompatActivity() {
         val scroll = ScrollView(this).apply { addView(content) }
         val header = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         header.addView(heading("Stemit", 29f), LinearLayout.LayoutParams(0, -2, 1f))
-        header.addView(actionButton("Menu  ⋮") { showMenu(it) })
+        val menuButton = actionButton("Menu  ⋮") { showMenu(menuButton) }
+        header.addView(menuButton)
         content.addView(header)
         content.addView(body("Your sound. Your stems."))
         val choose = LinearLayout(this).apply {
