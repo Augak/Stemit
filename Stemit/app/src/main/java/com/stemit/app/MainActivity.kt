@@ -339,10 +339,10 @@ class MainActivity : AppCompatActivity() {
                     val current = BuildConfig.VERSION_NAME
                     runOnUiThread {
                         if (tag.trimStart('v') == current.trimStart('v')) {
-                            showInfo("You're up to date", "Installed version: \$current\nLatest release: \$tag")
+                            showInfo("You're up to date", "Installed version: $current\nLatest release: $tag")
                         } else {
                             MaterialAlertDialogBuilder(this).setTitle("Stemit update available")
-                                .setMessage("Installed: \$current\nLatest: \$tag\n\nOpen the official release page to download and install the update.")
+                                .setMessage("Installed: $current\nLatest: $tag\n\nOpen the official release page to download and install the update.")
                                 .setPositiveButton("View update") { _, _ -> openUrl(page) }
                                 .setNegativeButton("Later", null).show()
                         }
