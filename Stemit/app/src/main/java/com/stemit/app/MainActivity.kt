@@ -330,13 +330,18 @@ class MainActivity : AppCompatActivity() {
                     setRequestProperty("Accept", "application/vnd.github+json")
                 }
                 if (connection.responseCode == 404) {
-                    runOnUiThread { showInfo("No release published yet", "This build is ${BuildConfig.VERSION_NAME}. There is not an official Stemit release published yet. Check the releases page later.") }
+                    runOnUiThread {
+                        MaterialAlertDialogBuilder(this).setTitle("No release published yet")
+                            .setMessage("This build is ${BuildConfig.VERSION_NAME}. There is not an official Stemit release published yet.")
+                            .setPositiveButton("View releases") { _, _ -> openUrl("https://github.com/Augak/Stemit/releases") }
+                            .setNegativeButton("Close", null).show()
+                    }
                 } else {
                     check(connection.responseCode in 200..299) { "Update check returned HTTP ${connection.responseCode}" }
                     val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
                     val tag = json.optString("tag_name", "latest")
                     val page = json.optString("html_url", "https://github.com/Augak/Stemit/releases")
-                    val current = BuildConfig.VERSION_NAME
+                    val current = BuildConfig.VERSION_NAME.removeSuffix("-debug")
                     runOnUiThread {
                         if (tag.trimStart('v') == current.trimStart('v')) {
                             showInfo("You're up to date", "Installed version: $current\nLatest release: $tag")
