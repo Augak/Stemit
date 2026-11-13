@@ -18,6 +18,7 @@ private class FloatSamples(initialCapacity: Int) {
         if (count == values.size) values = values.copyOf(values.size + values.size / 2)
         values[count++] = value
     }
+    fun isNotEmpty(): Boolean = count > 0
     fun toArray(): FloatArray = values.copyOf(count)
 }
 
