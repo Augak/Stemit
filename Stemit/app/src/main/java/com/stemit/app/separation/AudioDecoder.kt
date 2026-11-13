@@ -11,6 +11,16 @@ import java.nio.ByteOrder
 import kotlin.math.max
 import kotlin.math.min
 
+private class FloatSamples(initialCapacity: Int) {
+    private var values = FloatArray(initialCapacity.coerceAtLeast(1024))
+    private var count = 0
+    fun add(value: Float) {
+        if (count == values.size) values = values.copyOf(values.size + values.size / 2)
+        values[count++] = value
+    }
+    fun toArray(): FloatArray = values.copyOf(count)
+}
+
 class StereoAudio(
     val left: FloatArray,
     val right: FloatArray,
@@ -46,8 +56,8 @@ class AudioDecoder(private val context: Context) {
         codec.configure(format, null, null, 0)
         codec.start()
 
-        val left = ArrayList<Float>(sourceRate * 30)
-        val right = ArrayList<Float>(sourceRate * 30)
+        val left = FloatSamples(sourceRate * 10)
+        val right = FloatSamples(sourceRate * 10)
         val info = MediaCodec.BufferInfo()
         var inputDone = false
         var outputDone = false
@@ -102,8 +112,8 @@ class AudioDecoder(private val context: Context) {
         }
 
         require(left.isNotEmpty()) { "Audio decoder returned no samples" }
-        val l = left.toFloatArray()
-        val r = right.toFloatArray()
+        val l = left.toArray()
+        val r = right.toArray()
         return if (sourceRate == 44_100) {
             StereoAudio(l, r, sourceRate)
         } else {
@@ -117,8 +127,8 @@ class AudioDecoder(private val context: Context) {
         buffer: ByteBuffer,
         channels: Int,
         encoding: Int,
-        left: MutableList<Float>,
-        right: MutableList<Float>
+        left: FloatSamples,
+        right: FloatSamples
     ) {
         buffer.order(ByteOrder.LITTLE_ENDIAN)
         when (encoding) {
