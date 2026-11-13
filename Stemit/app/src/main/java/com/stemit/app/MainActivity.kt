@@ -250,7 +250,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showResultDialog(vocals: File, instrumental: File, duration: Float) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(8)) }
-        box.addView(body("Processed ${"%.1f".format(duration)} seconds."))
+        box.addView(body("Processed " + String.format("%.1f", duration) + " seconds."))
         box.addView(actionButton("Open vocals") { openAudio(vocals) })
         box.addView(actionButton("Open instrumental") { openAudio(instrumental) })
         MaterialAlertDialogBuilder(this).setTitle("Your stems are ready").setView(box).setPositiveButton("Done", null).show()
