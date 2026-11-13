@@ -59,14 +59,22 @@ class PolarFormerEngine(private val context: Context) {
         val audio = decoder.decode(uri)
         require(audio.sampleRate == SAMPLE_RATE) { "Audio must be 44.1 kHz after resampling" }
 
+        // This implementation retains the decoded track and several PCM working arrays.
+        // Check the app heap budget before allocating them so older phones fail gracefully.
+        val estimatedWorkingBytes = audio.length.toLong() * 36L + 140L * 1024L * 1024L
+        val safeHeapBudget = (Runtime.getRuntime().maxMemory().toLong() * 0.80).toLong()
+        require(estimatedWorkingBytes < safeHeapBudget) {
+            "This audio is too long for the memory available to Stemit on this phone. Try a shorter clip, close other apps, and try again."
+        }
+
         listener.onProgress(SeparationProgress(0.02f, "Preparing separation engine"))
         val modelFile = modelManager.ensureInstalled { p ->
             listener.onProgress(SeparationProgress(0.02f + p * 0.18f, "Downloading separation model ${(p * 100).toInt()}%"))
         }
 
         val options = OrtSession.SessionOptions().apply {
-            setInterOpNumThreads(max(1, Runtime.getRuntime().availableProcessors() / 2))
-            setIntraOpNumThreads(max(1, Runtime.getRuntime().availableProcessors()))
+            setInterOpNumThreads(1)
+            setIntraOpNumThreads(2)
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
         }
 
