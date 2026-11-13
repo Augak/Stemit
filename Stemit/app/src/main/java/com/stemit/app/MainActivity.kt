@@ -248,14 +248,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun showResultDialog(vocals: File, instrumental: File, duration: Float) {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(8)) }
-        box.addView(body("Processed \${"%.1f".format(duration)} seconds."))
+        box.addView(body("Processed ${"%.1f".format(duration)} seconds."))
         box.addView(actionButton("Open vocals") { openAudio(vocals) })
         box.addView(actionButton("Open instrumental") { openAudio(instrumental) })
         MaterialAlertDialogBuilder(this).setTitle("Your stems are ready").setView(box).setPositiveButton("Done", null).show()
     }
 
     private fun openAudio(file: File) {
-        val uri = FileProvider.getUriForFile(this, "\${packageName}.files", file)
+        val uri = FileProvider.getUriForFile(this, "${packageName}.files", file)
         val intent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "audio/wav")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -328,9 +328,9 @@ class MainActivity : AppCompatActivity() {
                     setRequestProperty("Accept", "application/vnd.github+json")
                 }
                 if (connection.responseCode == 404) {
-                    runOnUiThread { showInfo("No release published yet", "This build is \${BuildConfig.VERSION_NAME}. There is not an official Stemit release published yet. Check the releases page later.") }
+                    runOnUiThread { showInfo("No release published yet", "This build is ${BuildConfig.VERSION_NAME}. There is not an official Stemit release published yet. Check the releases page later.") }
                 } else {
-                    check(connection.responseCode in 200..299) { "Update check returned HTTP \${connection.responseCode}" }
+                    check(connection.responseCode in 200..299) { "Update check returned HTTP ${connection.responseCode}" }
                     val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
                     val tag = json.optString("tag_name", "latest")
                     val page = json.optString("html_url", "https://github.com/Augak/Stemit/releases")
@@ -359,7 +359,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showAbout() = showInfo(
         "About Stemit",
-        "Stemit · Version \${BuildConfig.VERSION_NAME}\n\nA mobile audio tool for separating vocals and instrumentals. Built by Kastine Augak.\n\nMore from the developer: github.com/Augak"
+        "Stemit · Version ${BuildConfig.VERSION_NAME}\n\nA mobile audio tool for separating vocals and instrumentals. Built by Kastine Augak.\n\nMore from the developer: github.com/Augak"
     )
 
     private fun showInfo(title: String, message: String) {
