@@ -28,7 +28,7 @@ class PolarFormerEngine(private val context: Context) {
         private const val N_FFT = 2_048
         private const val HOP = 512
         private const val WIN = 2_048
-        private const val CHUNK = 882_000
+        private const val CHUNK = 131_072 // ~3 seconds; keeps transformer attention manageable on phones
         private const val OVERLAP = 2
         private const val FREQ = N_FFT / 2 + 1
         private const val FEATURES = FREQ * 2 * 2
@@ -86,7 +86,10 @@ class PolarFormerEngine(private val context: Context) {
             val count = FloatArray(total)
             var start = 0
             var chunkIndex = 0
-            val chunkCount = max(1, ceil(total.toDouble() / step.toDouble()).toInt())
+            // Stop as soon as a chunk reaches the end. Continuing by another half-chunk
+            // would needlessly re-process the tail and can overweight the final audio.
+            val chunkCount = if (total <= CHUNK) 1
+                else ceil((total - CHUNK).toDouble() / step.toDouble()).toInt() + 1
 
             while (start < total) {
                 val end = min(start + CHUNK, total)
@@ -109,6 +112,7 @@ class PolarFormerEngine(private val context: Context) {
                         "Separating track ${chunkIndex.coerceAtMost(chunkCount)} of $chunkCount"
                     )
                 )
+                if (end >= total) break
                 start += step
             }
 
@@ -170,6 +174,10 @@ class PolarFormerEngine(private val context: Context) {
                     val buffer = it.floatBuffer
                     val mask = FloatArray(buffer.remaining())
                     buffer.get(mask)
+                    val expectedMaskValues = FREQ * 2 * frames * 2
+                    require(mask.size == expectedMaskValues) {
+                        "The separation model returned an unexpected mask shape. Please update the model or contact support."
+                    }
                     return reconstruct(stft, mask, frames, paddedLength)
                 }
             }
