@@ -23,9 +23,11 @@ The inference chunk size has been reduced, but the engine still holds the decode
 - Home: choose an audio file and separate vocals/instrumental.
 - Library: import audio, play supported formats, share, open in Studio, or delete saved items.
 - Studio: trim and change gain on 16-bit PCM WAV. It does not currently convert compressed formats or merge tracks.
-- Settings: notification permission explanation, model readiness, temporary cache cleanup and update check.
+- Settings: light/dark appearance, notification permission, model storage controls, temporary cache cleanup and update check.
+- Home-screen widget: quick access to Home and Library.
 - Help/About: in-app FAQ, developer contact and privacy/licence summary.
 - Premium: purchase and trial enforcement are not active; no payment is collected by this build.
+- Language: the current UI is English-only; localization is not yet complete.
 
 ## Build
 

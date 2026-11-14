@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Stemit</string>
+    <string name="widget_description">Quick access to Stemit and your audio library.</string>
 </resources>
