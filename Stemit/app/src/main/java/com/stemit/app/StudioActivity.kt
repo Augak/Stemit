@@ -11,6 +11,7 @@ import java.util.Locale
 
 class StudioActivity:AppCompatActivity() {
     private var source:File?=null
+    private var exporting=false
     private lateinit var selected:TextView
     private lateinit var start:EditText
     private lateinit var end:EditText
@@ -48,7 +49,17 @@ class StudioActivity:AppCompatActivity() {
         val a=start.text.toString().toDoubleOrNull() ?: 0.0
         val b=end.text.toString().toDoubleOrNull() ?: run { Toast.makeText(this,"Enter an end time.",Toast.LENGTH_SHORT).show(); return }
         val dir=File(filesDir,"library").apply { mkdirs() }; val output=File(dir,"edited-${System.currentTimeMillis()}.wav")
-        try { WavEditor.edit(input,output,a,b,gain.progress/100f); Toast.makeText(this,"Saved to your Library: ${output.name}",Toast.LENGTH_LONG).show() }
-        catch(e:Exception) { output.delete(); Toast.makeText(this,e.message ?: "Export failed",Toast.LENGTH_LONG).show() }
+        if (exporting) return
+        exporting=true
+        Toast.makeText(this,"Editing WAV…",Toast.LENGTH_SHORT).show()
+        Thread {
+            try {
+                WavEditor.edit(input,output,a,b,gain.progress/100f)
+                runOnUiThread { Toast.makeText(this,"Saved to your Library: ${output.name}",Toast.LENGTH_LONG).show(); exporting=false }
+            } catch(e:Exception) {
+                output.delete()
+                runOnUiThread { Toast.makeText(this,e.message ?: "Export failed",Toast.LENGTH_LONG).show(); exporting=false }
+            }
+        }.start()
     }
 }
