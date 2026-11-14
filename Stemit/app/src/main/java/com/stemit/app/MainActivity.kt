@@ -210,7 +210,13 @@ class MainActivity : AppCompatActivity() {
                                 start.isEnabled = true
                                 progress.visibility = View.GONE
                                 status.text = "Separation complete"
-                                showResultDialog(result.vocalsFile, result.instrumentalFile, result.durationSeconds)
+                                val libraryDir = File(filesDir, "library").apply { mkdirs() }
+                                val stamp = System.currentTimeMillis()
+                                val savedVocals = File(libraryDir, "vocals-$stamp.wav")
+                                val savedInstrumental = File(libraryDir, "instrumental-$stamp.wav")
+                                result.vocalsFile.copyTo(savedVocals, overwrite = true)
+                                result.instrumentalFile.copyTo(savedInstrumental, overwrite = true)
+                                showResultDialog(savedVocals, savedInstrumental, result.durationSeconds)
                             }
                         }
                     } catch (e: OutOfMemoryError) {
@@ -239,7 +245,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun showMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
+        popup.menu.add("Library").setOnMenuItemClickListener { startActivity(Intent(this, LibraryActivity::class.java)); true }
+        popup.menu.add("Studio tools").setOnMenuItemClickListener { startActivity(Intent(this, StudioActivity::class.java)); true }
+        popup.menu.add("Premium").setOnMenuItemClickListener { showInfo("Stemit Premium", "Premium purchases are not enabled in this build. No payment or trial is started. Core vocal separation remains available after the model download."); true }
         popup.menu.add("FAQ & Help").setOnMenuItemClickListener { showFaq(); true }
+        popup.menu.add("Privacy & licences").setOnMenuItemClickListener { showInfo("Privacy & open-source licences", "Stemit processes selected audio on this device after downloading its separation model. Audio is not uploaded to Stemit servers by the separation workflow.\n\nModel: BS PolarFormer FP16 by bgkb. Verify upstream model licence terms before redistribution.\nRuntime: ONNX Runtime for Android by Microsoft.\n\nPrivacy and licence details: https://github.com/Augak/Stemit"); true }
         popup.menu.add("About Stemit").setOnMenuItemClickListener { showAbout(); true }
         popup.menu.add("Settings").setOnMenuItemClickListener { showSettings(); true }
         popup.menu.add("Check for updates").setOnMenuItemClickListener { checkForUpdates(); true }
@@ -277,6 +287,12 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(notifications)
         box.addView(actionButton("Permissions") { explainPermissions() })
+        box.addView(body("Downloaded model: " + if (engine.modelInstalled()) "Ready for offline use" else "Not downloaded yet"))
+        box.addView(actionButton("Clear temporary files") {
+            val temp = File(cacheDir, "separated")
+            val removed = temp.listFiles()?.sumOf { if (it.delete()) 1 else 0 } ?: 0
+            showInfo("Temporary files", "Removed $removed temporary file(s). Your saved Library files were not touched.")
+        })
         box.addView(actionButton("Check for updates") { checkForUpdates() })
         box.addView(actionButton("More from the developer") { openUrl("https://github.com/Augak") })
         box.addView(actionButton("Contact developer") { contactDeveloper() })

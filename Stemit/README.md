@@ -1,26 +1,35 @@
 # Stemit — Android audio studio
 
-Stemit is an Android audio application with on-device vocal/instrumental separation.
+Stemit separates a selected audio track into vocals and instrumental stems using on-device ONNX inference.
 
-## Current build
+## Current development build
 
-- Version: 1.0.2 (version code 3)
-- Minimum Android: Android 7.0 (API 24)
-- Separation runtime: ONNX Runtime for Android
-- Model: BS PolarFormer FP16 (~103 MB), downloaded on first use
-- Processing: local on-device inference after model download
+- Version: 1.0.3 (version code 4)
+- Minimum Android: 7.0 (API 24)
+- Separation model: BS PolarFormer FP16, downloaded on first use (~103 MB)
+- Audio processing: on-device after the model download
+- Library: persistent private storage for separated stems and imported audio
+- Studio: WAV trim and gain editing for 16-bit PCM mono/stereo files
+- Sharing: Android Sharesheet with temporary read access to the selected output
 
-## Storage and device requirements
+## Storage and memory
 
-The model is not bundled in the APK. It is downloaded into the app's private files directory when the user first starts separation. The downloader now checks available storage before starting, keeps the download temporary until validation succeeds, flushes the completed file, and removes incomplete temporary downloads after failures.
+The model is stored in the app's private files directory and is not bundled into the APK. The Library stores saved audio in app-private storage. Deleting the app removes these private files unless Android backs them up.
 
-The release build enables R8 code shrinking and resource shrinking. ABI splits are configured for arm64-v8a, armeabi-v7a and x86_64, with a universal APK retained for compatibility/testing.
+The inference chunk size has been reduced, but the engine still holds the decoded source and multiple full-track PCM arrays. This build does **not** guarantee reliable separation on every 2 GB RAM phone. Try shorter tracks and close other apps if memory is low. A true streaming decoder/inference/writer pipeline remains future work.
 
-The current separation engine still holds decoded audio and multiple working arrays in memory. This release adds safer model-download storage handling and APK size optimisation; it does **not** yet claim streaming inference or guarantee operation on every 2 GB RAM device. Shorter source clips and closing other apps can still be necessary. Streaming/chunk-output processing is a separate engineering task that requires dedicated audio regression tests.
+## Features and limitations
+
+- Home: choose an audio file and separate vocals/instrumental.
+- Library: import audio, play supported formats, share, open in Studio, or delete saved items.
+- Studio: trim and change gain on 16-bit PCM WAV. It does not currently convert compressed formats or merge tracks.
+- Settings: notification permission explanation, model readiness, temporary cache cleanup and update check.
+- Help/About: in-app FAQ, developer contact and privacy/licence summary.
+- Premium: purchase and trial enforcement are not active; no payment is collected by this build.
 
 ## Build
 
-The repository's GitHub Actions workflow builds the debug APK. For a release build, use an Android Gradle environment with Java 17 and run:
+The GitHub Actions workflow builds debug APKs. For a release build with Java 17:
 
 ```bash
 gradle -p Stemit :app:assembleRelease
@@ -28,9 +37,6 @@ gradle -p Stemit :app:assembleRelease
 
 Release outputs include ABI-specific APKs and a universal APK.
 
-## Model and attribution
+## Model and third-party attribution
 
-- BS PolarFormer model by bgkb, based on Music-Source-Separation-Training.
-- ONNX Runtime Android by Microsoft.
-
-The upstream model repository currently identifies the model as MIT licensed. Verify upstream model and dependency license terms before redistribution or commercial use.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and verify upstream terms before redistribution or commercial use.
