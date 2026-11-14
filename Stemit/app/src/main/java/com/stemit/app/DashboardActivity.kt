@@ -171,19 +171,41 @@ class DashboardActivity : AppCompatActivity() {
 
     private fun bottomBar(): View {
         val bar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
-            setPadding(dp(4), dp(7), dp(4), dp(7)); setBackgroundColor(surface())
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(dp(4), dp(7), dp(4), dp(7))
+            setBackgroundColor(surface())
+            contentDescription = "Main navigation"
         }
-        listOf("Home" to "⌂", "Search" to "⌕", "Library" to "▤", "Premium" to "☆", "Settings" to "⚙").forEach { (name, glyph) ->
+        val destinations = listOf(
+            Triple("Home", android.R.drawable.ic_menu_view, "Home"),
+            Triple("Search", android.R.drawable.ic_menu_search, "Search"),
+            Triple("Library", android.R.drawable.ic_menu_agenda, "Audio library"),
+            Triple("Premium", android.R.drawable.btn_star_big_off, "Premium"),
+            Triple("Settings", android.R.drawable.ic_menu_preferences, "Settings")
+        )
+        destinations.forEach { (name, iconRes, description) ->
+            val selected = activeTab == name
+            val tint = if (selected) accent() else muted()
             val item = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-                isClickable = true; isFocusable = true; setPadding(dp(2), dp(3), dp(2), dp(3))
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                isClickable = true
+                isFocusable = true
+                isSelected = selected
+                contentDescription = "$description tab"
+                setPadding(dp(2), dp(3), dp(2), dp(3))
                 setOnClickListener { showTab(name) }
             }
-            item.addView(label(glyph, 21f, if (activeTab == name) accent() else muted()).apply { gravity = Gravity.CENTER })
-            item.addView(label(name, 10f, if (activeTab == name) accent() else muted()).apply {
+            item.addView(ImageView(this).apply {
+                setImageResource(iconRes)
+                setColorFilter(tint)
+                contentDescription = "$description icon"
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+            }, LinearLayout.LayoutParams(dp(22), dp(22)))
+            item.addView(label(name, 10f, tint).apply {
                 gravity = Gravity.CENTER
-                if (activeTab == name) typeface = Typeface.DEFAULT_BOLD
+                if (selected) typeface = Typeface.DEFAULT_BOLD
             })
             bar.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
         }
