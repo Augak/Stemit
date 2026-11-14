@@ -17,6 +17,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.app.NotificationCompat
+import androidx.appcompat.app.AppCompatDelegate
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -34,6 +36,7 @@ class DashboardActivity : AppCompatActivity() {
     private val ui = Handler(Looper.getMainLooper())
     private val engine by lazy { PolarFormerEngine(this) }
     private var selectedUri: Uri? = null
+    private var importingToLibrary = false
     private var selectedName = "No audio selected"
     private var activeTab = "Home"
     private var query = ""
@@ -42,10 +45,14 @@ class DashboardActivity : AppCompatActivity() {
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let {
-            selectedUri = it
-            selectedName = it.lastPathSegment?.substringAfterLast('/') ?: "Audio selected"
-            showTab("Home")
-            Toast.makeText(this, "Audio ready", Toast.LENGTH_SHORT).show()
+            if (importingToLibrary) {
+                importToLibrary(it)
+            } else {
+                selectedUri = it
+                selectedName = it.lastPathSegment?.substringAfterLast('/') ?: "Audio selected"
+                showTab("Home")
+                Toast.makeText(this, "Audio ready", Toast.LENGTH_SHORT).show()
+            }
         }
     }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -213,6 +220,7 @@ class DashboardActivity : AppCompatActivity() {
                         if (!isFinishing) {
                             start.isEnabled = true; progress.visibility = View.GONE; status.text = "Separation complete"
                             resultDialog(vocals, instrumental, result.durationSeconds)
+                            notifySeparationComplete(vocals, instrumental)
                         }
                     }
                 } catch (e: OutOfMemoryError) {
@@ -272,7 +280,7 @@ class DashboardActivity : AppCompatActivity() {
     private fun library() {
         page.addView(title("Library", 24f))
         page.addView(paragraph("Your saved stems and imported audio stay on this device."))
-        page.addView(button("Import audio", false) { picker.launch(arrayOf("audio/*")) }, space(8, 12))
+        page.addView(button("Import audio", false) { importingToLibrary = true; picker.launch(arrayOf("audio/*")) }, space(8, 12))
         val all = files()
         page.addView(section("Saved audio", "Refresh") { showTab("Library") }, space(0, 8))
         if (all.isEmpty()) {
@@ -286,6 +294,45 @@ class DashboardActivity : AppCompatActivity() {
             page.addView(paragraph("Use Open to play, Share to export, or Studio to trim and adjust WAV volume."))
             page.addView(button("Open full Library manager", false) { startActivity(Intent(this, LibraryActivity::class.java)) }, space())
         }
+    }
+
+    private fun importToLibrary(uri: Uri) {
+        try {
+            val dir = File(filesDir, "library").apply { mkdirs() }
+            val displayName = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            } ?: "audio-${System.currentTimeMillis()}.audio"
+            val safeName = displayName.replace(Regex("[^A-Za-z0-9._ -]"), "_")
+            val target = File(dir, "${System.currentTimeMillis()}-$safeName")
+            contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
+                ?: error("Unable to read selected audio.")
+            importingToLibrary = false
+            Toast.makeText(this, "Added to your Library.", Toast.LENGTH_SHORT).show()
+            showTab("Library")
+        } catch (e: Exception) {
+            importingToLibrary = false
+            info("Import failed", e.message ?: "The audio file could not be imported.")
+        }
+    }
+
+    private fun notifySeparationComplete(vocals: File, instrumental: File) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(
+            android.app.NotificationChannel("stemit_results", "Separation results", android.app.NotificationManager.IMPORTANCE_DEFAULT)
+                .apply { description = "Notifies you when your audio stems are ready." }
+        )
+        val pending = android.app.PendingIntent.getActivity(
+            this, 12, Intent(this, DashboardActivity::class.java),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        manager.notify(12, NotificationCompat.Builder(this, "stemit_results")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("Your Stemit stems are ready")
+            .setContentText("${vocals.name} and ${instrumental.name} were saved to your Library.")
+            .setContentIntent(pending).setAutoCancel(true).build())
     }
 
     private fun files(): List<File> {
@@ -334,7 +381,10 @@ class DashboardActivity : AppCompatActivity() {
         appearance.addView(title("Appearance", 17f))
         appearance.addView(SwitchMaterial(this).apply {
             text = "Dark theme"; setTextColor(ink()); isChecked = dark()
-            setOnCheckedChangeListener { _, enabled -> prefs.edit().putBoolean("dark_theme", enabled).apply(); showTab("Settings") }
+            setOnCheckedChangeListener { _, enabled ->
+                prefs.edit().putBoolean("dark_theme", enabled).apply()
+                AppCompatDelegate.setDefaultNightMode(if (enabled) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
+            }
         })
         page.addView(card(appearance), space(8, 10))
 
@@ -346,6 +396,15 @@ class DashboardActivity : AppCompatActivity() {
                 prefs.edit().putBoolean("notifications", enabled).apply()
                 if (enabled) requestNotifications()
             }
+        })
+        preferences.addView(paragraph("Separation model: " + if (engine.modelInstalled()) "Downloaded and ready" else "Not downloaded yet"))
+        preferences.addView(button("Remove downloaded model", false) {
+            androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Remove separation model?")
+                .setMessage("This frees model storage. The next separation will download the model again.")
+                .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
+                    val removed = engine.removeModel()
+                    info("Model storage", if (removed) "Downloaded model removed." else "Could not remove the model.")
+                }.show()
         })
         preferences.addView(button("Storage and cache", false) {
             val bytes = cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }

@@ -25,6 +25,8 @@ class ModelManager(private val context: Context) {
 
     fun isInstalled(): Boolean = modelFile.exists() && modelFile.length() > 50_000_000L
 
+    fun deleteInstalled(): Boolean = !modelFile.exists() || modelFile.delete()
+
     /**
      * Fail early with an actionable message instead of filling the user's
      * internal storage with an incomplete model download.

@@ -46,6 +46,8 @@ class PolarFormerEngine(private val context: Context) {
 
     fun modelInstalled(): Boolean = modelManager.isInstalled()
 
+    fun removeModel(): Boolean = modelManager.deleteInstalled()
+
     fun downloadModel(onProgress: (Float) -> Unit = {}): File =
         modelManager.ensureInstalled(onProgress)
 
