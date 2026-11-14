@@ -10,7 +10,7 @@ Stemit separates a selected audio track into vocals and instrumental stems using
 - Audio processing: on-device after the model download
 - Library: persistent private storage for separated stems and imported audio
 - Studio: WAV trim and gain editing for 16-bit PCM mono/stereo files
-- Sharing: Android Sharesheet with temporary read access to the selected output
+- Sharing and export: Android Sharesheet plus Save a copy through Android's system document picker
 
 ## Storage and memory
 
@@ -24,7 +24,7 @@ The inference chunk size has been reduced, but the engine still holds the decode
 - Library: import audio, play supported formats, share, open in Studio, or delete saved items.
 - Studio: trim and change gain on 16-bit PCM WAV. It does not currently convert compressed formats or merge tracks.
 - Settings: light/dark appearance, notification permission, model storage controls, temporary cache cleanup and update check.
-- Home-screen widget: quick access to Home and Library.
+- Home-screen widget: quick access to Home and Library. Add it by long-pressing the Android home screen, opening Widgets, and selecting Stemit.
 - Help/About: in-app FAQ, developer contact and privacy/licence summary.
 - Premium: purchase and trial enforcement are not active; no payment is collected by this build.
 - Language: the current UI is English-only; localization is not yet complete.
