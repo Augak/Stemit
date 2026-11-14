@@ -44,15 +44,15 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var page: LinearLayout
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        uri?.let {
-            if (importingToLibrary) {
-                importToLibrary(it)
-            } else {
-                selectedUri = it
-                selectedName = it.lastPathSegment?.substringAfterLast('/') ?: "Audio selected"
-                showTab("Home")
-                Toast.makeText(this, "Audio ready", Toast.LENGTH_SHORT).show()
-            }
+        if (uri == null) {
+            importingToLibrary = false
+        } else if (importingToLibrary) {
+            importToLibrary(uri)
+        } else {
+            selectedUri = uri
+            selectedName = uri.lastPathSegment?.substringAfterLast('/') ?: "Audio selected"
+            showTab("Home")
+            Toast.makeText(this, "Audio ready", Toast.LENGTH_SHORT).show()
         }
     }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -301,7 +301,10 @@ class DashboardActivity : AppCompatActivity() {
             val dir = File(filesDir, "library").apply { mkdirs() }
             val displayName = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
                 if (it.moveToFirst()) it.getString(0) else null
-            } ?: "audio-${System.currentTimeMillis()}.audio"
+            } ?: run {
+                val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(contentResolver.getType(uri)) ?: "wav"
+                "audio-${System.currentTimeMillis()}.$ext"
+            }
             val safeName = displayName.replace(Regex("[^A-Za-z0-9._ -]"), "_")
             val target = File(dir, "${System.currentTimeMillis()}-$safeName")
             contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
@@ -397,7 +400,7 @@ class DashboardActivity : AppCompatActivity() {
                 if (enabled) requestNotifications()
             }
         })
-        preferences.addView(paragraph("Separation model: " + if (engine.modelInstalled()) "Downloaded and ready" else "Not downloaded yet"))
+        preferences.addView(paragraph("Separation model: " + (if (engine.modelInstalled()) "Downloaded and ready" else "Not downloaded yet")))
         preferences.addView(button("Remove downloaded model", false) {
             androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Remove separation model?")
                 .setMessage("This frees model storage. The next separation will download the model again.")
