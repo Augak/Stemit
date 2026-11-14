@@ -16,6 +16,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.app.NotificationCompat
 import com.stemit.app.separation.PolarFormerEngine
 import java.io.File
 import java.net.HttpURLConnection
@@ -96,20 +98,20 @@ class MainActivity : AppCompatActivity() {
     private fun baseLayout(): LinearLayout = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(18), dp(18), dp(26))
-        setBackgroundColor(0xFFF3F6F8.toInt())
+        setBackgroundColor(getColor(R.color.stemit_background))
     }
 
     private fun heading(text: String, size: Float = 25f): TextView = TextView(this).apply {
         this.text = text
         textSize = size
-        setTextColor(0xFF122438.toInt())
+        setTextColor(getColor(R.color.stemit_text))
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
 
     private fun body(text: String): TextView = TextView(this).apply {
         this.text = text
         textSize = 14f
-        setTextColor(0xFF526273.toInt())
+        setTextColor(getColor(R.color.stemit_muted))
         setLineSpacing(dp(2).toFloat(), 1f)
         setPadding(0, dp(7), 0, dp(7))
     }
@@ -126,8 +128,8 @@ class MainActivity : AppCompatActivity() {
         radius = dp(18).toFloat()
         cardElevation = dp(1).toFloat()
         strokeWidth = dp(1)
-        setStrokeColor(0xFFE2E9EE.toInt())
-        setCardBackgroundColor(0xFFFFFFFF.toInt())
+        setStrokeColor(getColor(R.color.stemit_outline))
+        setCardBackgroundColor(getColor(R.color.stemit_surface))
         addView(view)
     }
 
@@ -167,7 +169,7 @@ class MainActivity : AppCompatActivity() {
                 tag = "selected_audio"
                 text = "No audio selected"
                 textSize = 13f
-                setTextColor(0xFF148C89.toInt())
+                setTextColor(getColor(R.color.stemit_accent))
                 setPadding(0, dp(8), 0, 0)
             })
         }
@@ -217,6 +219,7 @@ class MainActivity : AppCompatActivity() {
                                 result.vocalsFile.copyTo(savedVocals, overwrite = true)
                                 result.instrumentalFile.copyTo(savedInstrumental, overwrite = true)
                                 showResultDialog(savedVocals, savedInstrumental, result.durationSeconds)
+                                notifySeparationComplete(savedVocals, savedInstrumental)
                             }
                         }
                     } catch (e: OutOfMemoryError) {
@@ -275,8 +278,54 @@ class MainActivity : AppCompatActivity() {
         try { startActivity(intent) } catch (_: Exception) { showInfo("No audio player", "Install or enable an audio player to open this WAV file.") }
     }
 
+    private fun notifySeparationComplete(vocals: File, instrumental: File) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+        if (Build.VERSION.SDK_INT >= 26) {
+            manager.createNotificationChannel(android.app.NotificationChannel(
+                "stemit_separation", "Separation results", android.app.NotificationManager.IMPORTANCE_DEFAULT
+            ).apply { description = "Notifies you when your audio stems are ready." })
+        }
+        val pending = android.app.PendingIntent.getActivity(
+            this, 1, Intent(this, LibraryActivity::class.java),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(this, "stemit_separation")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("Your Stemit stems are ready")
+            .setContentText("${vocals.name} and ${instrumental.name} were saved to your Library.")
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(1001, notification)
+    }
+
     private fun showSettings() {
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), dp(8), dp(20), dp(8)) }
+        box.addView(body("Appearance"))
+        val themeGroup = RadioGroup(this).apply { orientation = RadioGroup.VERTICAL }
+        val themeChoice = prefs.getString("theme_mode", "system")
+        listOf("system" to "Use device setting", "light" to "Light", "dark" to "Dark").forEach { (value, label) ->
+            val radio = android.widget.RadioButton(this@MainActivity).apply {
+                id = View.generateViewId()
+                text = label
+                tag = value
+                isChecked = themeChoice == value
+            }
+            themeGroup.addView(radio)
+        }
+        themeGroup.setOnCheckedChangeListener { group, checkedId ->
+            val selected = group.findViewById<android.widget.RadioButton>(checkedId)?.tag?.toString() ?: "system"
+            prefs.edit().putString("theme_mode", selected).apply()
+            AppCompatDelegate.setDefaultNightMode(when (selected) {
+                "dark" -> AppCompatDelegate.MODE_NIGHT_YES
+                "light" -> AppCompatDelegate.MODE_NIGHT_NO
+                else -> AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM
+            })
+        }
+        box.addView(themeGroup)
         val notifications = SwitchMaterial(this).apply {
             text = "Allow notifications"
             isChecked = prefs.getBoolean("notifications", false)
