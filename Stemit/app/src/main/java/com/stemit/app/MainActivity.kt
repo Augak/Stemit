@@ -339,7 +339,7 @@ class MainActivity : AppCompatActivity() {
         box.addView(body("Downloaded model: " + (if (engine.modelInstalled()) "Ready for offline use" else "Not downloaded yet")))
         box.addView(actionButton("Clear temporary files") {
             val temp = File(cacheDir, "separated")
-            val removed = temp.listFiles()?.sumOf { if (it.delete()) 1 else 0 } ?: 0
+            val removed = temp.listFiles()?.count { it.delete() } ?: 0
             showInfo("Temporary files", "Removed $removed temporary file(s). Your saved Library files were not touched.")
         })
         box.addView(actionButton("Check for updates") { checkForUpdates() })
