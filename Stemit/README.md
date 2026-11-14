@@ -1,39 +1,36 @@
-# Stemit — Android vocal separation
+# Stemit — Android audio studio
 
-This build contains a real on-device vocal-separation engine rather than a demo/mock result.
+Stemit is an Android audio application with on-device vocal/instrumental separation.
 
-## Engine
+## Current build
 
-- **Model:** BS PolarFormer ONNX, FP16 weights (~103 MB)
-- **Runtime:** ONNX Runtime for Android 1.30.0
-- **Sample rate:** 44.1 kHz stereo
-- **DSP:** centered Hann STFT (2048 FFT / 512 hop), complex mask multiplication, inverse STFT and overlap averaging
-- **Outputs:** `vocals.wav` and `instrumental.wav`
-- **Network:** only needed the first time to download the model; once cached, separation is local/offline
+- Version: 1.0.2 (version code 3)
+- Minimum Android: Android 7.0 (API 24)
+- Separation runtime: ONNX Runtime for Android
+- Model: BS PolarFormer FP16 (~103 MB), downloaded on first use
+- Processing: local on-device inference after model download
 
-The model is not bundled into this ZIP because it is about 103 MB. Stemit downloads it into the app's private model directory on the first separation. The model repository states an MIT license and documents the model as a 44.1 kHz stereo vocal/instrumental separator.
+## Storage and device requirements
 
-## First run
+The model is not bundled in the APK. It is downloaded into the app's private files directory when the user first starts separation. The downloader now checks available storage before starting, keeps the download temporary until validation succeeds, flushes the completed file, and removes incomplete temporary downloads after failures.
 
-1. Open the project in Android Studio/another Android Gradle environment.
-2. Build and install the app.
-3. Pick an audio file.
-4. Tap **Start separation**.
-5. Wait for the one-time model download.
-6. The engine decodes the track, resamples it to 44.1 kHz, runs ONNX inference in overlapping chunks, reconstructs the vocals and creates the instrumental as `original - vocals`.
-7. Future separations use the cached model and do not need network access.
+The release build enables R8 code shrinking and resource shrinking. ABI splits are configured for arm64-v8a, armeabi-v7a and x86_64, with a universal APK retained for compatibility/testing.
 
-## Important device note
+The current separation engine still holds decoded audio and multiple working arrays in memory. This release adds safer model-download storage handling and APK size optimisation; it does **not** yet claim streaming inference or guarantee operation on every 2 GB RAM device. Shorter source clips and closing other apps can still be necessary. Streaming/chunk-output processing is a separate engineering task that requires dedicated audio regression tests.
 
-This is a substantial neural audio model. Low-memory or older phones may take several minutes per track and may need more storage/RAM. The app processes the track in 20-second overlapping chunks to limit peak memory use.
+## Build
 
-## Model URL
+The repository's GitHub Actions workflow builds the debug APK. For a release build, use an Android Gradle environment with Java 17 and run:
 
-`https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer_fp16.onnx`
+```bash
+gradle -p Stemit :app:assembleRelease
+```
 
-## Sources / attribution
+Release outputs include ABI-specific APKs and a universal APK.
 
-- BS PolarFormer model by `bgkb`, based on the Music-Source-Separation-Training project.
+## Model and attribution
+
+- BS PolarFormer model by bgkb, based on Music-Source-Separation-Training.
 - ONNX Runtime Android by Microsoft.
 
-Before commercial distribution, keep the model attribution/license notices with the release and verify the current upstream license terms.
+The upstream model repository currently identifies the model as MIT licensed. Verify upstream model and dependency license terms before redistribution or commercial use.
