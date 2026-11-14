@@ -37,6 +37,7 @@ class DashboardActivity : AppCompatActivity() {
     private val engine by lazy { PolarFormerEngine(this) }
     private var selectedUri: Uri? = null
     private var importingToLibrary = false
+    private var exportFile: File? = null
     private var selectedName = "No audio selected"
     private var activeTab = "Home"
     private var query = ""
@@ -54,6 +55,19 @@ class DashboardActivity : AppCompatActivity() {
             showTab("Home")
             Toast.makeText(this, "Audio ready", Toast.LENGTH_SHORT).show()
         }
+    }
+    private val savePicker = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri ->
+        val file = exportFile
+        if (uri != null && file != null) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
+                    ?: error("Unable to create destination file.")
+                Toast.makeText(this, "Saved a copy to your chosen folder.", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                info("Export failed", e.message ?: "Could not save the audio file.")
+            }
+        }
+        exportFile = null
     }
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (!granted) Toast.makeText(this, "Notifications are still off.", Toast.LENGTH_SHORT).show()
@@ -355,6 +369,10 @@ class DashboardActivity : AppCompatActivity() {
         actions.addView(label("Share", 12f, accent()).apply {
             setPadding(dp(5), dp(8), dp(14), dp(4)); setOnClickListener { shareFile(file) }
         })
+        actions.addView(label("Save copy", 12f, accent()).apply {
+            setPadding(dp(5), dp(8), dp(14), dp(4))
+            setOnClickListener { exportFile = file; savePicker.launch(file.name) }
+        })
         actions.addView(label("Studio", 12f, accent()).apply {
             setPadding(dp(5), dp(8), dp(14), dp(4))
             setOnClickListener { startActivity(Intent(this@DashboardActivity, StudioActivity::class.java).putExtra("file", file.absolutePath)) }
@@ -462,6 +480,8 @@ class DashboardActivity : AppCompatActivity() {
         box.addView(button("Open instrumental") { openFile(instrumental) })
         box.addView(button("Share vocals") { shareFile(vocals) })
         box.addView(button("Share instrumental") { shareFile(instrumental) })
+        box.addView(button("Save vocals to device") { exportFile = vocals; savePicker.launch(vocals.name) })
+        box.addView(button("Save instrumental to device") { exportFile = instrumental; savePicker.launch(instrumental.name) })
         MaterialAlertDialogBuilder(this).setTitle("Your stems are ready").setView(box)
             .setPositiveButton("View Library") { _, _ -> showTab("Library") }.show()
     }

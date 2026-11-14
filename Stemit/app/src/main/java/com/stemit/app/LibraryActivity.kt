@@ -18,9 +18,23 @@ class LibraryActivity : AppCompatActivity() {
     private val libraryDir by lazy { File(filesDir, "library").apply { mkdirs() } }
     private var player: MediaPlayer? = null
     private var playingFile: File? = null
+    private var exportFile: File? = null
     private lateinit var list: LinearLayout
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         uri?.let { importFile(it) }
+    }
+    private val savePicker = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri ->
+        val file = exportFile
+        if (uri != null && file != null) {
+            try {
+                contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
+                    ?: error("Unable to create destination file.")
+                Toast.makeText(this, "Audio copy saved.", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, e.message ?: "Export failed", Toast.LENGTH_LONG).show()
+            }
+        }
+        exportFile = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); render() }
@@ -50,6 +64,7 @@ class LibraryActivity : AppCompatActivity() {
             val actions=LinearLayout(this)
             actions.addView(Button(this).apply { text=if(playingFile==file && player?.isPlaying==true) "Pause" else "Play"; setOnClickListener { toggle(file); text=if(player?.isPlaying==true) "Pause" else "Play" } })
             actions.addView(Button(this).apply { text="Share"; setOnClickListener { share(file) } })
+            actions.addView(Button(this).apply { text="Save copy"; setOnClickListener { exportFile=file; savePicker.launch(file.name) } })
             actions.addView(Button(this).apply { text="Studio"; setOnClickListener { startActivity(Intent(this@LibraryActivity,StudioActivity::class.java).putExtra("file",file.absolutePath)) } })
             actions.addView(Button(this).apply { text="Delete"; setOnClickListener {
                 androidx.appcompat.app.AlertDialog.Builder(this@LibraryActivity).setMessage("Delete ${file.name}?").setNegativeButton("Cancel",null).setPositiveButton("Delete") { _,_ -> if(playingFile==file) stopPlayer(); file.delete(); refresh() }.show()
