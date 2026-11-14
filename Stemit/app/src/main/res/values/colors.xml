@@ -1,4 +1,9 @@
 <resources>
-    <color name="stemit_background">#F7F7F5</color>
+    <color name="stemit_background">#F3F6F8</color>
+    <color name="stemit_surface">#FFFFFF</color>
+    <color name="stemit_text">#122438</color>
+    <color name="stemit_muted">#526273</color>
+    <color name="stemit_outline">#E2E9EE</color>
+    <color name="stemit_accent">#148C89</color>
     <color name="stemit_primary">#171717</color>
 </resources>

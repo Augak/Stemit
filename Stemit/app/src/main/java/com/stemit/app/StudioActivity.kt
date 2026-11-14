@@ -19,9 +19,9 @@ class StudioActivity:AppCompatActivity() {
     private val picker=registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let { copyInput(it) } }
     override fun onCreate(savedInstanceState:Bundle?) {
         super.onCreate(savedInstanceState)
-        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,20,20,20); setBackgroundColor(0xFFF3F6F8.toInt()) }
-        root.addView(TextView(this).apply { text="Studio"; textSize=26f; setTextColor(0xFF122438.toInt()) })
-        root.addView(TextView(this).apply { text="Trim and adjust volume on 16-bit PCM WAV stems. Original audio is never changed."; textSize=14f; setTextColor(0xFF526273.toInt()) })
+        val root=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(20,20,20,20); setBackgroundColor(getColor(R.color.stemit_background)) }
+        root.addView(TextView(this).apply { text="Studio"; textSize=26f; setTextColor(getColor(R.color.stemit_text)) })
+        root.addView(TextView(this).apply { text="Trim and adjust volume on 16-bit PCM WAV stems. Original audio is never changed."; textSize=14f; setTextColor(getColor(R.color.stemit_muted)) })
         selected=TextView(this).apply { text="No WAV selected"; setPadding(0,16,0,12) }; root.addView(selected)
         root.addView(Button(this).apply { text="Choose WAV file"; setOnClickListener { picker.launch(arrayOf("audio/wav","audio/x-wav")) } })
         start=field("Start time (seconds)","0"); end=field("End time (seconds)","")

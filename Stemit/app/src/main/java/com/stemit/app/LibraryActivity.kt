@@ -26,12 +26,12 @@ class LibraryActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) { super.onCreate(savedInstanceState); render() }
 
     private fun render() {
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(20,20,20,20); setBackgroundColor(0xFFF3F6F8.toInt()) }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(20,20,20,20); setBackgroundColor(getColor(R.color.stemit_background)) }
         val header = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        header.addView(TextView(this).apply { text="Library"; textSize=26f; setTextColor(0xFF122438.toInt()) }, LinearLayout.LayoutParams(0,-2,1f))
+        header.addView(TextView(this).apply { text="Library"; textSize=26f; setTextColor(getColor(R.color.stemit_text)) }, LinearLayout.LayoutParams(0,-2,1f))
         header.addView(Button(this).apply { text="Add audio"; setOnClickListener { picker.launch(arrayOf("audio/*")) } })
         root.addView(header)
-        root.addView(TextView(this).apply { text="Your saved stems and imported audio stay on this device."; textSize=14f; setTextColor(0xFF526273.toInt()) })
+        root.addView(TextView(this).apply { text="Your saved stems and imported audio stay on this device."; textSize=14f; setTextColor(getColor(R.color.stemit_muted)) })
         val scroll=ScrollView(this)
         list=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL }
         scroll.addView(list); root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -44,9 +44,9 @@ class LibraryActivity : AppCompatActivity() {
         val files=libraryDir.listFiles()?.filter { it.isFile && it.extension.lowercase() in listOf("wav","mp3","m4a","aac","ogg","flac") }?.sortedByDescending { it.lastModified() }.orEmpty()
         if(files.isEmpty()) list.addView(TextView(this).apply { text="Your library is empty. Separate a track or use Add audio to import a file."; textSize=15f; setPadding(0,32,0,32); setTextColor(0xFF526273.toInt()) })
         files.forEach { file ->
-            val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); setBackgroundColor(0xFFFFFFFF.toInt()) }
+            val card=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(14,12,14,12); setBackgroundColor(getColor(R.color.stemit_surface)) }
             card.addView(TextView(this).apply { text=file.name; textSize=16f; setTextColor(0xFF122438.toInt()) })
-            card.addView(TextView(this).apply { text="${formatBytes(file.length())}  •  ${SimpleDateFormat("dd MMM yyyy",Locale.getDefault()).format(Date(file.lastModified()))}"; textSize=12f; setTextColor(0xFF647486.toInt()) })
+            card.addView(TextView(this).apply { text="${formatBytes(file.length())}  •  ${SimpleDateFormat("dd MMM yyyy",Locale.getDefault()).format(Date(file.lastModified()))}"; textSize=12f; setTextColor(getColor(R.color.stemit_muted)) })
             val actions=LinearLayout(this)
             actions.addView(Button(this).apply { text=if(playingFile==file && player?.isPlaying==true) "Pause" else "Play"; setOnClickListener { toggle(file); text=if(player?.isPlaying==true) "Pause" else "Play" } })
             actions.addView(Button(this).apply { text="Share"; setOnClickListener { share(file) } })

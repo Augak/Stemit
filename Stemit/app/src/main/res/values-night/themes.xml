@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.Stemit" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:fontFamily">sans</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:statusBarColor">@color/stemit_background</item>
+        <item name="android:navigationBarColor">@color/stemit_background</item>
+        <item name="android:colorAccent">?attr/colorPrimary</item>
+    </style>
+</resources>

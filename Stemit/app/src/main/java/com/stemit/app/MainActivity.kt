@@ -287,7 +287,7 @@ class MainActivity : AppCompatActivity() {
         }
         box.addView(notifications)
         box.addView(actionButton("Permissions") { explainPermissions() })
-        box.addView(body("Downloaded model: " + if (engine.modelInstalled()) "Ready for offline use" else "Not downloaded yet"))
+        box.addView(body("Downloaded model: " + (if (engine.modelInstalled()) "Ready for offline use" else "Not downloaded yet")))
         box.addView(actionButton("Clear temporary files") {
             val temp = File(cacheDir, "separated")
             val removed = temp.listFiles()?.sumOf { if (it.delete()) 1 else 0 } ?: 0
