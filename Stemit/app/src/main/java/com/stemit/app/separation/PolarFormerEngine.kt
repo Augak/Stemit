@@ -6,21 +6,18 @@ import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import java.io.BufferedOutputStream
+import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
+import java.io.RandomAccessFile
 import java.nio.FloatBuffer
 import kotlin.math.PI
 import kotlin.math.ceil
-import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.sqrt
 
 /**
- * Real on-device vocal separation engine.
- *
- * Pipeline:
- * MediaCodec decode -> 44.1 kHz stereo -> centered Hann STFT ->
- * BS PolarFormer ONNX -> complex mask -> iSTFT -> overlap averaging -> WAV.
+ * Memory-bounded vocal separation.
+ * Decoded source and WAV stems stream through disk; inference uses fixed-size overlapping windows.
  */
 class PolarFormerEngine(private val context: Context) {
     companion object {
@@ -28,12 +25,11 @@ class PolarFormerEngine(private val context: Context) {
         private const val N_FFT = 2_048
         private const val HOP = 512
         private const val WIN = 2_048
-        private const val CHUNK = 131_072 // ~3 seconds; keeps transformer attention manageable on phones
-        private const val OVERLAP = 2
+        private const val CHUNK = 131_072
+        private const val HALF_CHUNK = CHUNK / 2
         private const val FREQ = N_FFT / 2 + 1
-        private const val FEATURES = FREQ * 2 * 2
+        private const val FEATURES = FREQ * 4
         private const val MODEL_INPUT = "stft_features"
-        private const val MODEL_OUTPUT = "mask"
     }
 
     private val modelManager = ModelManager(context)
@@ -45,11 +41,8 @@ class PolarFormerEngine(private val context: Context) {
     private val ortEnv by lazy { OrtEnvironment.getEnvironment() }
 
     fun modelInstalled(): Boolean = modelManager.isInstalled()
-
     fun removeModel(): Boolean = modelManager.deleteInstalled()
-
-    fun downloadModel(onProgress: (Float) -> Unit = {}): File =
-        modelManager.ensureInstalled(onProgress)
+    fun downloadModel(onProgress: (Float) -> Unit = {}): File = modelManager.ensureInstalled(onProgress)
 
     fun separate(
         uri: Uri,
@@ -57,105 +50,169 @@ class PolarFormerEngine(private val context: Context) {
         listener: SeparationProgressListener = SeparationProgressListener { }
     ): SeparationResult {
         outputDirectory.mkdirs()
-        listener.onProgress(SeparationProgress(0f, "Reading audio"))
-        val audio = decoder.decode(uri)
-        require(audio.sampleRate == SAMPLE_RATE) { "Audio must be 44.1 kHz after resampling" }
+        val rawFile = File(outputDirectory, "source-44100.pcm")
+        val vocalsFile = File(outputDirectory, "vocals.wav")
+        val instrumentalFile = File(outputDirectory, "instrumental.wav")
+        vocalsFile.delete()
+        instrumentalFile.delete()
 
-        // This implementation retains the decoded track and several PCM working arrays.
-        // Check the app heap budget before allocating them so older phones fail gracefully.
-        val estimatedWorkingBytes = audio.length.toLong() * 36L + 140L * 1024L * 1024L
-        val safeHeapBudget = (Runtime.getRuntime().maxMemory().toLong() * 0.80).toLong()
-        require(estimatedWorkingBytes < safeHeapBudget) {
-            "This audio is too long for the memory available to Stemit on this phone. Try a shorter clip, close other apps, and try again."
-        }
+        try {
+            listener.onProgress(SeparationProgress(0.01f, "Preparing separation model"))
+            val modelFile = modelManager.ensureInstalled { p ->
+                listener.onProgress(SeparationProgress(0.02f + p * 0.16f, "Downloading model " + (p * 100).toInt() + "%"))
+            }
 
-        listener.onProgress(SeparationProgress(0.02f, "Preparing separation engine"))
-        val modelFile = modelManager.ensureInstalled { p ->
-            listener.onProgress(SeparationProgress(0.02f + p * 0.18f, "Downloading separation model ${(p * 100).toInt()}%"))
-        }
+            listener.onProgress(SeparationProgress(0.19f, "Decoding audio to temporary storage"))
+            val totalSamples = decoder.decodeToPcm16(uri, rawFile, SAMPLE_RATE)
+            require(totalSamples > 0L) { "No audio samples could be decoded from this file." }
 
-        val options = OrtSession.SessionOptions().apply {
-            setInterOpNumThreads(1)
-            setIntraOpNumThreads(2)
-            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-        }
+            val options = OrtSession.SessionOptions().apply {
+                setInterOpNumThreads(1)
+                setIntraOpNumThreads(1)
+                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            }
 
-        ortEnv.createSession(modelFile.absolutePath, options).use { session ->
-            val total = audio.length
-            val step = CHUNK / OVERLAP
-            val resultL = FloatArray(total)
-            val resultR = FloatArray(total)
-            val count = FloatArray(total)
-            var start = 0
-            var chunkIndex = 0
-            // Stop after the chunk that reaches the end; do not re-process the tail.
-            val chunkCount = if (total <= CHUNK) 1
-                else ceil((total - CHUNK).toDouble() / step.toDouble()).toInt() + 1
+            ortEnv.createSession(modelFile.absolutePath, options).use { session ->
+                RandomAccessFile(rawFile, "r").use { source ->
+                    WavStreamWriter(vocalsFile, totalSamples, SAMPLE_RATE).use { vocalOut ->
+                        WavStreamWriter(instrumentalFile, totalSamples, SAMPLE_RATE).use { instrumentalOut ->
+                            val chunkCount = if (totalSamples <= CHUNK) 1
+                                else ceil((totalSamples - CHUNK).toDouble() / HALF_CHUNK.toDouble()).toInt() + 1
 
-            while (start < total) {
-                val end = min(start + CHUNK, total)
-                val chunkL = FloatArray(CHUNK)
-                val chunkR = FloatArray(CHUNK)
-                audio.left.copyInto(chunkL, 0, start, end)
-                audio.right.copyInto(chunkR, 0, start, end)
+                            var heldVocalsL: FloatArray? = null
+                            var heldVocalsR: FloatArray? = null
+                            var heldOriginalL: FloatArray? = null
+                            var heldOriginalR: FloatArray? = null
+                            var lastStart = 0L
+                            val inputL = FloatArray(CHUNK)
+                            val inputR = FloatArray(CHUNK)
 
-                val stems = inferChunk(session, chunkL, chunkR)
-                val actual = end - start
-                for (i in 0 until actual) {
-                    resultL[start + i] += stems.first[i]
-                    resultR[start + i] += stems.second[i]
-                    count[start + i] += 1f
+                            for (chunkIndex in 0 until chunkCount) {
+                                val start = chunkIndex.toLong() * HALF_CHUNK.toLong()
+                                lastStart = start
+                                readPcmChunk(source, start, totalSamples, inputL, inputR)
+                                val stems = inferChunk(session, inputL, inputR)
+
+                                if (chunkIndex == 0 && totalSamples <= CHUNK) {
+                                    writeStemPair(vocalOut, instrumentalOut, stems.first, stems.second, inputL, inputR, totalSamples.toInt())
+                                } else if (chunkIndex == 0) {
+                                    writeStemPair(vocalOut, instrumentalOut, stems.first, stems.second, inputL, inputR, HALF_CHUNK)
+                                    heldVocalsL = stems.first.copyOfRange(HALF_CHUNK, CHUNK)
+                                    heldVocalsR = stems.second.copyOfRange(HALF_CHUNK, CHUNK)
+                                    heldOriginalL = inputL.copyOfRange(HALF_CHUNK, CHUNK)
+                                    heldOriginalR = inputR.copyOfRange(HALF_CHUNK, CHUNK)
+                                } else {
+                                    val oldL = heldVocalsL ?: error("Missing overlap audio.")
+                                    val oldR = heldVocalsR ?: error("Missing overlap audio.")
+                                    val oldOriginalL = heldOriginalL ?: error("Missing source overlap.")
+                                    val oldOriginalR = heldOriginalR ?: error("Missing source overlap.")
+                                    val blendL = FloatArray(HALF_CHUNK)
+                                    val blendR = FloatArray(HALF_CHUNK)
+                                    for (i in 0 until HALF_CHUNK) {
+                                        val amount = (i + 1).toFloat() / (HALF_CHUNK + 1).toFloat()
+                                        blendL[i] = oldL[i] * (1f - amount) + stems.first[i] * amount
+                                        blendR[i] = oldR[i] * (1f - amount) + stems.second[i] * amount
+                                    }
+                                    writeStemPair(vocalOut, instrumentalOut, blendL, blendR, oldOriginalL, oldOriginalR, HALF_CHUNK)
+                                    heldVocalsL = stems.first.copyOfRange(HALF_CHUNK, CHUNK)
+                                    heldVocalsR = stems.second.copyOfRange(HALF_CHUNK, CHUNK)
+                                    heldOriginalL = inputL.copyOfRange(HALF_CHUNK, CHUNK)
+                                    heldOriginalR = inputR.copyOfRange(HALF_CHUNK, CHUNK)
+                                }
+
+                                listener.onProgress(
+                                    SeparationProgress(
+                                        0.20f + 0.76f * ((chunkIndex + 1).toFloat() / chunkCount.toFloat()),
+                                        "Separating audio " + (chunkIndex + 1) + " of " + chunkCount
+                                    )
+                                )
+                            }
+
+                            if (totalSamples > CHUNK) {
+                                val tailCount = (totalSamples - (lastStart + HALF_CHUNK)).coerceIn(0L, HALF_CHUNK.toLong()).toInt()
+                                if (tailCount > 0) {
+                                    writeStemPair(
+                                        vocalOut,
+                                        instrumentalOut,
+                                        heldVocalsL ?: error("Missing final vocal segment."),
+                                        heldVocalsR ?: error("Missing final vocal segment."),
+                                        heldOriginalL ?: error("Missing final source segment."),
+                                        heldOriginalR ?: error("Missing final source segment."),
+                                        tailCount
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
-                chunkIndex++
-                listener.onProgress(
-                    SeparationProgress(
-                        0.20f + 0.72f * (chunkIndex.toFloat() / chunkCount.toFloat()),
-                        "Separating track ${chunkIndex.coerceAtMost(chunkCount)} of $chunkCount"
-                    )
-                )
-                if (end >= total) break
-                start += step
             }
 
-            val vocalsL = FloatArray(total)
-            val vocalsR = FloatArray(total)
-            for (i in 0 until total) {
-                val c = if (count[i] == 0f) 1f else count[i]
-                vocalsL[i] = (resultL[i] / c).coerceIn(-1f, 1f)
-                vocalsR[i] = (resultR[i] / c).coerceIn(-1f, 1f)
-            }
-
-            val instrumentalL = FloatArray(total)
-            val instrumentalR = FloatArray(total)
-            for (i in 0 until total) {
-                instrumentalL[i] = (audio.left[i] - vocalsL[i]).coerceIn(-1f, 1f)
-                instrumentalR[i] = (audio.right[i] - vocalsR[i]).coerceIn(-1f, 1f)
-            }
-
-            listener.onProgress(SeparationProgress(0.94f, "Writing vocals"))
-            val vocalsFile = File(outputDirectory, "vocals.wav")
-            val instrumentalFile = File(outputDirectory, "instrumental.wav")
-            WavWriter.writeStereo16(vocalsFile, vocalsL, vocalsR, SAMPLE_RATE)
-            listener.onProgress(SeparationProgress(0.98f, "Writing instrumental"))
-            WavWriter.writeStereo16(instrumentalFile, instrumentalL, instrumentalR, SAMPLE_RATE)
             listener.onProgress(SeparationProgress(1f, "Separation complete"))
-            return SeparationResult(vocalsFile, instrumentalFile, total.toFloat() / SAMPLE_RATE)
+            return SeparationResult(vocalsFile, instrumentalFile, totalSamples.toFloat() / SAMPLE_RATE.toFloat())
+        } catch (e: Exception) {
+            vocalsFile.delete()
+            instrumentalFile.delete()
+            throw e
+        } finally {
+            rawFile.delete()
         }
     }
 
+    private fun readPcmChunk(
+        file: RandomAccessFile,
+        start: Long,
+        total: Long,
+        left: FloatArray,
+        right: FloatArray
+    ) {
+        java.util.Arrays.fill(left, 0f)
+        java.util.Arrays.fill(right, 0f)
+        val count = min(CHUNK.toLong(), total - start).toInt()
+        if (count <= 0) return
+        file.seek(start * 4L)
+        val bytes = ByteArray(count * 4)
+        file.readFully(bytes)
+        var offset = 0
+        for (i in 0 until count) {
+            val l = ((bytes[offset].toInt() and 0xff) or ((bytes[offset + 1].toInt() and 0xff) shl 8)).toShort()
+            val r = ((bytes[offset + 2].toInt() and 0xff) or ((bytes[offset + 3].toInt() and 0xff) shl 8)).toShort()
+            left[i] = l.toFloat() / 32768f
+            right[i] = r.toFloat() / 32768f
+            offset += 4
+        }
+    }
+
+    private fun writeStemPair(
+        vocals: WavStreamWriter,
+        instrumental: WavStreamWriter,
+        vocalL: FloatArray,
+        vocalR: FloatArray,
+        originalL: FloatArray,
+        originalR: FloatArray,
+        count: Int
+    ) {
+        val instrumentalL = FloatArray(count)
+        val instrumentalR = FloatArray(count)
+        for (i in 0 until count) {
+            instrumentalL[i] = (originalL[i] - vocalL[i]).coerceIn(-1f, 1f)
+            instrumentalR[i] = (originalR[i] - vocalR[i]).coerceIn(-1f, 1f)
+        }
+        vocals.write(vocalL, vocalR, count)
+        instrumental.write(instrumentalL, instrumentalR, count)
+    }
+
     private fun inferChunk(session: OrtSession, left: FloatArray, right: FloatArray): Pair<FloatArray, FloatArray> {
-        val paddedLength = CHUNK + N_FFT
         val frames = CHUNK / HOP + 1
         val stft = FloatArray(2 * FREQ * frames * 2)
-        computeStft(left, 0, stft, 0, frames)
-        computeStft(right, 1, stft, 0, frames)
+        computeStft(left, 0, stft, frames)
+        computeStft(right, 1, stft, frames)
 
         val features = FloatArray(frames * FEATURES)
         var dst = 0
         for (t in 0 until frames) {
             for (f in 0 until FREQ) {
-                val baseL = ((0 * FREQ + f) * frames + t) * 2
-                val baseR = ((1 * FREQ + f) * frames + t) * 2
+                val baseL = (f * frames + t) * 2
+                val baseR = ((FREQ + f) * frames + t) * 2
                 features[dst++] = stft[baseL]
                 features[dst++] = stft[baseL + 1]
                 features[dst++] = stft[baseR]
@@ -176,22 +233,14 @@ class PolarFormerEngine(private val context: Context) {
                     val mask = FloatArray(buffer.remaining())
                     buffer.get(mask)
                     val expectedMaskValues = FREQ * 2 * frames * 2
-                    require(mask.size == expectedMaskValues) {
-                        "The separation model returned an unexpected mask shape. Please update the model or contact support."
-                    }
-                    return reconstruct(stft, mask, frames, paddedLength)
+                    require(mask.size == expectedMaskValues) { "The separation model returned an unexpected output shape." }
+                    return reconstruct(stft, mask, frames)
                 }
             }
         }
     }
 
-    private fun computeStft(
-        source: FloatArray,
-        channel: Int,
-        out: FloatArray,
-        unused: Int,
-        frames: Int
-    ) {
+    private fun computeStft(source: FloatArray, channel: Int, out: FloatArray, frames: Int) {
         val pad = N_FFT / 2
         val real = FloatArray(N_FFT)
         val imag = FloatArray(N_FFT)
@@ -211,10 +260,10 @@ class PolarFormerEngine(private val context: Context) {
         }
     }
 
-    private fun reconstruct(stft: FloatArray, mask: FloatArray, frames: Int, paddedLength: Int): Pair<FloatArray, FloatArray> {
+    private fun reconstruct(stft: FloatArray, mask: FloatArray, frames: Int): Pair<FloatArray, FloatArray> {
+        val paddedLength = CHUNK + N_FFT
         val left = FloatArray(CHUNK)
         val right = FloatArray(CHUNK)
-        val norm = FloatArray(CHUNK + N_FFT)
         val workR = FloatArray(N_FFT)
         val workI = FloatArray(N_FFT)
         val pad = N_FFT / 2
@@ -228,7 +277,7 @@ class PolarFormerEngine(private val context: Context) {
                 for (f in 0 until FREQ) {
                     val stftIndex = ((channel * FREQ + f) * frames + t) * 2
                     val maskFlat = f * 2 + channel
-                    val maskIndex = (((maskFlat * frames + t) * 2))
+                    val maskIndex = maskFlat * frames * 2 + t * 2
                     var mr = mask[maskIndex]
                     var mi = mask[maskIndex + 1]
                     if (f == 0) { mr = 0f; mi = 0f }
@@ -249,16 +298,16 @@ class PolarFormerEngine(private val context: Context) {
                 for (n in 0 until N_FFT) {
                     val pos = start + n
                     if (pos < paddedLength) {
-                        val w = hann[n]
-                        acc[pos] += workR[n] * w
-                        windowNorm[pos] += w * w
+                        val window = hann[n]
+                        acc[pos] += workR[n] * window
+                        windowNorm[pos] += window * window
                     }
                 }
             }
             for (i in 0 until CHUNK) {
-                val p = i + pad
-                target[i] = if (p < acc.size && windowNorm[p] > 1e-8f) {
-                    acc[p] / windowNorm[p]
+                val position = i + pad
+                target[i] = if (position < acc.size && windowNorm[position] > 1e-8f) {
+                    acc[position] / windowNorm[position]
                 } else 0f
             }
         }
@@ -270,33 +319,61 @@ class PolarFormerEngine(private val context: Context) {
 
     private fun reflectIndex(index: Int, length: Int): Int {
         if (length <= 1) return 0
-        var i = index
-        while (i < 0 || i >= length) {
-            i = if (i < 0) -i else 2 * length - 2 - i
+        var value = index
+        while (value < 0 || value >= length) {
+            value = if (value < 0) -value else 2 * length - 2 - value
         }
-        return i
+        return value
     }
 }
 
-object WavWriter {
-    fun writeStereo16(file: File, left: FloatArray, right: FloatArray, sampleRate: Int) {
-        require(left.size == right.size)
-        val dataBytes = left.size * 4L
-        BufferedOutputStream(FileOutputStream(file), 64 * 1024).use { out ->
-            fun le16(v: Int) { out.write(v and 0xff); out.write((v ushr 8) and 0xff) }
-            fun le32(v: Long) {
-                out.write((v and 0xff).toInt()); out.write(((v ushr 8) and 0xff).toInt())
-                out.write(((v ushr 16) and 0xff).toInt()); out.write(((v ushr 24) and 0xff).toInt())
-            }
-            out.write("RIFF".toByteArray()); le32(36 + dataBytes); out.write("WAVE".toByteArray())
-            out.write("fmt ".toByteArray()); le32(16); le16(1); le16(2); le32(sampleRate.toLong())
-            le32((sampleRate * 4L)); le16(4); le16(16)
-            out.write("data".toByteArray()); le32(dataBytes)
-            for (i in left.indices) {
-                val l = (left[i].coerceIn(-1f, 1f) * 32767f).toInt()
-                val r = (right[i].coerceIn(-1f, 1f) * 32767f).toInt()
-                le16(l); le16(r)
-            }
+private class WavStreamWriter(
+    file: File,
+    frameCount: Long,
+    sampleRate: Int
+) : Closeable {
+    private val output = BufferedOutputStream(FileOutputStream(file), 128 * 1024)
+
+    init {
+        val dataBytes = frameCount * 4L
+        require(dataBytes <= 0xffff_ffffL - 36L) { "This audio is too long for the WAV export format." }
+        output.write("RIFF".toByteArray())
+        writeInt(36L + dataBytes)
+        output.write("WAVE".toByteArray())
+        output.write("fmt ".toByteArray())
+        writeInt(16L)
+        writeShort(1)
+        writeShort(2)
+        writeInt(sampleRate.toLong())
+        writeInt(sampleRate * 4L)
+        writeShort(4)
+        writeShort(16)
+        output.write("data".toByteArray())
+        writeInt(dataBytes)
+    }
+
+    fun write(left: FloatArray, right: FloatArray, count: Int) {
+        require(count <= left.size && count <= right.size)
+        for (i in 0 until count) {
+            writeShort((left[i].coerceIn(-1f, 1f) * 32767f).toInt())
+            writeShort((right[i].coerceIn(-1f, 1f) * 32767f).toInt())
         }
+    }
+
+    private fun writeShort(value: Int) {
+        output.write(value and 0xff)
+        output.write((value ushr 8) and 0xff)
+    }
+
+    private fun writeInt(value: Long) {
+        output.write((value and 0xff).toInt())
+        output.write(((value ushr 8) and 0xff).toInt())
+        output.write(((value ushr 16) and 0xff).toInt())
+        output.write(((value ushr 24) and 0xff).toInt())
+    }
+
+    override fun close() {
+        output.flush()
+        output.close()
     }
 }
