@@ -3,22 +3,21 @@ package com.stemit.app
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.graphics.Typeface
+import android.media.MediaPlayer
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.Gravity
 import android.view.View
-import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
-import androidx.appcompat.app.AppCompatDelegate
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -27,185 +26,234 @@ import com.stemit.app.separation.PolarFormerEngine
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
 import java.util.concurrent.Executors
 import org.json.JSONObject
 
+/**
+ * Stemit has one job: turn one audio track into vocals and instrumental stems.
+ * Navigation is intentionally limited to Home, Library and Settings.
+ */
 class DashboardActivity : AppCompatActivity() {
     private val prefs by lazy { getSharedPreferences("stemit", MODE_PRIVATE) }
     private val worker = Executors.newSingleThreadExecutor()
-    private val ui = Handler(Looper.getMainLooper())
     private val engine by lazy { PolarFormerEngine(this) }
     private var selectedUri: Uri? = null
-    private var importingToLibrary = false
-    private var exportFile: File? = null
     private var selectedName = "No audio selected"
+    private var isProcessing = false
+    private var progressValue = 0
+    private var progressMessage = "Choose a song to begin"
+    private var exportFile: File? = null
+    private var player: MediaPlayer? = null
+    private var playingFile: File? = null
     private var activeTab = "Home"
-    private var query = ""
-    private lateinit var root: LinearLayout
     private lateinit var page: LinearLayout
+    private var progressBar: ProgressBar? = null
+    private var progressLabel: TextView? = null
+    private var separateButton: MaterialButton? = null
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri == null) {
-            importingToLibrary = false
-        } else if (importingToLibrary) {
-            importToLibrary(uri)
-        } else {
+        if (uri != null) {
             selectedUri = uri
-            selectedName = uri.lastPathSegment?.substringAfterLast('/') ?: "Audio selected"
-            showTab("Home")
-            Toast.makeText(this, "Audio ready", Toast.LENGTH_SHORT).show()
+            selectedName = displayName(uri)
+            render("Home")
         }
     }
-    private val savePicker = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/*")) { uri ->
-        val file = exportFile
-        if (uri != null && file != null) {
+
+    private val savePicker = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri ->
+        val source = exportFile
+        if (uri != null && source != null) {
             try {
-                contentResolver.openOutputStream(uri)?.use { output -> file.inputStream().use { it.copyTo(output) } }
-                    ?: error("Unable to create destination file.")
-                Toast.makeText(this, "Saved a copy to your chosen folder.", Toast.LENGTH_LONG).show()
+                contentResolver.openOutputStream(uri)?.use { output ->
+                    source.inputStream().use { input -> input.copyTo(output) }
+                } ?: error("Could not create the selected file.")
+                Toast.makeText(this, "Audio saved.", Toast.LENGTH_SHORT).show()
             } catch (e: Exception) {
-                info("Export failed", e.message ?: "Could not save the audio file.")
+                showInfo("Save failed", e.message ?: "The audio could not be saved.")
             }
         }
         exportFile = null
     }
+
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (!granted) Toast.makeText(this, "Notifications are still off.", Toast.LENGTH_SHORT).show()
+        prefs.edit().putBoolean("notifications", granted).apply()
+        if (!granted) Toast.makeText(this, "Notifications remain off.", Toast.LENGTH_SHORT).show()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (!prefs.getBoolean("onboarding_complete", false)) onboarding() else showTab("Home")
-        askNotificationPermissionOnce()
+        if (!prefs.getBoolean("onboarding_complete", false)) showWelcome() else render("Home")
     }
 
-    private fun dark() = prefs.getBoolean("dark_theme", false)
-    private fun background() = if (dark()) 0xFF121212.toInt() else 0xFFF7F7F5.toInt()
-    private fun surface() = if (dark()) 0xFF202020.toInt() else 0xFFFFFFFF.toInt()
-    private fun ink() = if (dark()) 0xFFF5F5F5.toInt() else 0xFF171717.toInt()
-    private fun muted() = if (dark()) 0xFFB8B8B8.toInt() else 0xFF666666.toInt()
-    private fun accent() = if (dark()) 0xFFC6A7FF.toInt() else 0xFF6842A6.toInt()
-    private fun border() = if (dark()) 0xFF383838.toInt() else 0xFFE7E5E2.toInt()
-    private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
+    private fun isDark() = prefs.getBoolean("dark_theme", false)
+    private fun colorBackground() = if (isDark()) 0xFF101114.toInt() else 0xFFF6F6F4.toInt()
+    private fun colorSurface() = if (isDark()) 0xFF1B1D21.toInt() else 0xFFFFFFFF.toInt()
+    private fun colorText() = if (isDark()) 0xFFF5F5F2.toInt() else 0xFF191A1C.toInt()
+    private fun colorMuted() = if (isDark()) 0xFFADB1B8.toInt() else 0xFF6B7077.toInt()
+    private fun colorAccent() = if (isDark()) 0xFF8FD9D1.toInt() else 0xFF087F78.toInt()
+    private fun colorBorder() = if (isDark()) 0xFF30343A.toInt() else 0xFFE5E6E3.toInt()
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
-    private fun label(value: String, size: Float = 14f, color: Int = ink()) = TextView(this).apply {
-        text = value; textSize = size; setTextColor(color)
+    private fun text(value: String, size: Float = 14f, color: Int = colorText()) = TextView(this).apply {
+        text = value
+        textSize = size
+        setTextColor(color)
+        includeFontPadding = false
     }
-    private fun title(value: String, size: Float = 24f) = label(value, size).apply {
+
+    private fun heading(value: String, size: Float = 25f) = text(value, size).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     }
-    private fun paragraph(value: String) = label(value, 14f, muted()).apply {
-        setPadding(0, dp(5), 0, dp(7)); setLineSpacing(dp(2).toFloat(), 1f)
+
+    private fun paragraph(value: String) = text(value, 14f, colorMuted()).apply {
+        setLineSpacing(dp(3).toFloat(), 1f)
     }
-    private fun column() = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL; setPadding(dp(15), dp(14), dp(15), dp(15))
+
+    private fun vertical(spacing: Int = 0) = LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        if (spacing > 0) setPadding(dp(spacing), dp(spacing), dp(spacing), dp(spacing))
     }
-    private fun card(view: View) = MaterialCardView(this).apply {
-        radius = dp(16).toFloat(); cardElevation = 0f; strokeWidth = dp(1)
-        setStrokeColor(border()); setCardBackgroundColor(surface()); addView(view)
+
+    private fun card(content: View) = MaterialCardView(this).apply {
+        radius = dp(18).toFloat()
+        cardElevation = 0f
+        strokeWidth = dp(1)
+        strokeColor = colorBorder()
+        setCardBackgroundColor(colorSurface())
+        addView(content)
     }
-    private fun button(text: String, primary: Boolean = false, action: () -> Unit) = MaterialButton(this).apply {
-        this.text = text; isAllCaps = false; cornerRadius = dp(12)
-        backgroundTintList = android.content.res.ColorStateList.valueOf(if (primary) accent() else surface())
-        setTextColor(if (primary) 0xFFFFFFFF.toInt() else ink())
-        if (!primary) { strokeWidth = dp(1); strokeColor = android.content.res.ColorStateList.valueOf(border()) }
-        setOnClickListener { action() }
-    }
-    private fun space(top: Int = 0, bottom: Int = 10) = LinearLayout.LayoutParams(-1, -2).apply {
+
+    private fun button(caption: String, primary: Boolean = false, onClick: () -> Unit) =
+        MaterialButton(this).apply {
+            text = caption
+            isAllCaps = false
+            textSize = 15f
+            minHeight = dp(50)
+            cornerRadius = dp(14)
+            insetTop = 0
+            insetBottom = 0
+            backgroundTintList = ColorStateList.valueOf(if (primary) colorAccent() else colorSurface())
+            setTextColor(if (primary) 0xFFFFFFFF.toInt() else colorText())
+            if (!primary) {
+                strokeWidth = dp(1)
+                strokeColor = ColorStateList.valueOf(colorBorder())
+            }
+            setOnClickListener { onClick() }
+        }
+
+    private fun margin(top: Int = 0, bottom: Int = 12) = LinearLayout.LayoutParams(-1, -2).apply {
         setMargins(0, dp(top), 0, dp(bottom))
     }
 
-    private fun onboarding() {
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER
-            setPadding(dp(28), dp(28), dp(28), dp(28)); setBackgroundColor(background())
+    private fun showWelcome() {
+        val root = vertical(28).apply {
+            gravity = Gravity.CENTER
+            setBackgroundColor(colorBackground())
         }
-        panel.addView(ImageView(this).apply { setImageResource(R.drawable.ic_stemit); scaleType = ImageView.ScaleType.FIT_CENTER },
-            LinearLayout.LayoutParams(dp(84), dp(84)).apply { gravity = Gravity.CENTER })
-        panel.addView(title("Welcome to Stemit").apply { gravity = Gravity.CENTER; setPadding(0, dp(16), 0, 0) })
-        panel.addView(paragraph("Your sound. Your stems.\n\nSeparate a song into vocals and instrumental audio with on-device processing.").apply { gravity = Gravity.CENTER })
-        panel.addView(paragraph("The first separation downloads a model of about 103 MB. After that, processing is designed to run on your phone.").apply { gravity = Gravity.CENTER })
-        panel.addView(button("Get started", true) {
-            prefs.edit().putBoolean("onboarding_complete", true).apply(); showTab("Home")
+        root.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_stemit)
+            contentDescription = "Stemit"
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }, LinearLayout.LayoutParams(dp(76), dp(76)).apply { gravity = Gravity.CENTER })
+        root.addView(heading("Stemit", 30f).apply { gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(6)) })
+        root.addView(paragraph("Separate a song into vocals and instrumental audio. Nothing else gets in the way.").apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
         })
-        setContentView(panel)
+        root.addView(paragraph("The first use downloads the separation model (about 103 MB). Your selected audio is processed on this device.").apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setPadding(0, dp(12), 0, dp(22))
+        })
+        root.addView(button("Continue", true) {
+            prefs.edit().putBoolean("onboarding_complete", true).apply()
+            render("Home")
+        }, LinearLayout.LayoutParams(-1, -2))
+        setContentView(root)
+        applySystemBars()
     }
 
-    private fun showTab(tab: String) {
+    private fun render(tab: String) {
         activeTab = tab
-        root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(background()) }
-        window.statusBarColor = background()
-        window.navigationBarColor = surface()
-        if (Build.VERSION.SDK_INT >= 26) window.decorView.systemUiVisibility =
-            if (dark()) 0 else View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
-
-        val top = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(18), dp(11), dp(18), dp(10)); setBackgroundColor(surface())
+        applySystemBars()
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(colorBackground())
         }
-        top.addView(ImageView(this).apply { setImageResource(R.drawable.ic_stemit); scaleType = ImageView.ScaleType.FIT_CENTER },
-            LinearLayout.LayoutParams(dp(38), dp(38)))
-        val brand = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
-        brand.addView(title("Stemit", 20f))
-        brand.addView(label("Your sound. Your stems.", 11f, muted()))
-        top.addView(brand, LinearLayout.LayoutParams(0, -2, 1f))
-        top.addView(button("⋮") { menu(itAnchor = top) }.apply { minWidth = dp(42); textSize = 20f })
-        root.addView(top)
-
-        page = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(dp(18), dp(18), dp(18), dp(22))
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(22), dp(16), dp(22), dp(14))
         }
-        val scroll = ScrollView(this).apply { isFillViewport = true; addView(page) }
+        header.addView(ImageView(this).apply {
+            setImageResource(R.drawable.ic_stemit)
+            contentDescription = "Stemit"
+        }, LinearLayout.LayoutParams(dp(34), dp(34)))
+        header.addView(heading("Stemit", 21f), LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginStart = dp(10)
+        })
+        root.addView(header)
+
+        page = vertical().apply { setPadding(dp(20), dp(8), dp(20), dp(24)) }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            addView(page)
+        }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(bottomBar())
+        root.addView(bottomNavigation())
         setContentView(root)
 
         when (tab) {
             "Home" -> home()
-            "Search" -> search()
             "Library" -> library()
-            "Premium" -> premium()
             "Settings" -> settings()
         }
+        page.alpha = 0f
+        page.translationY = dp(5).toFloat()
+        page.animate().alpha(1f).translationY(0f).setDuration(180).start()
     }
 
-    private fun bottomBar(): View {
+    private fun applySystemBars() {
+        window.statusBarColor = colorBackground()
+        window.navigationBarColor = colorSurface()
+        window.decorView.systemUiVisibility = if (isDark()) 0 else
+            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+    }
+
+    private fun bottomNavigation(): View {
         val bar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(dp(4), dp(7), dp(4), dp(7))
-            setBackgroundColor(surface())
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setBackgroundColor(colorSurface())
             contentDescription = "Main navigation"
         }
-        val destinations = listOf(
-            Triple("Home", android.R.drawable.ic_menu_view, "Home"),
-            Triple("Search", android.R.drawable.ic_menu_search, "Search"),
-            Triple("Library", android.R.drawable.ic_menu_agenda, "Audio library"),
-            Triple("Premium", android.R.drawable.btn_star_big_off, "Premium"),
-            Triple("Settings", android.R.drawable.ic_menu_preferences, "Settings")
-        )
-        destinations.forEach { (name, iconRes, description) ->
+        listOf(
+            Triple("Home", android.R.drawable.ic_menu_view, "Separate audio"),
+            Triple("Library", android.R.drawable.ic_menu_agenda, "Saved audio"),
+            Triple("Settings", android.R.drawable.ic_menu_preferences, "App settings")
+        ).forEach { (name, icon, description) ->
             val selected = activeTab == name
-            val tint = if (selected) accent() else muted()
+            val tint = if (selected) colorAccent() else colorMuted()
             val item = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 gravity = Gravity.CENTER
                 isClickable = true
                 isFocusable = true
-                isSelected = selected
-                contentDescription = "$description tab"
-                setPadding(dp(2), dp(3), dp(2), dp(3))
-                setOnClickListener { showTab(name) }
+                contentDescription = description
+                setPadding(dp(8), dp(5), dp(8), dp(4))
+                setOnClickListener { if (!isProcessing || name == "Home") render(name) }
             }
             item.addView(ImageView(this).apply {
-                setImageResource(iconRes)
+                setImageResource(icon)
                 setColorFilter(tint)
-                contentDescription = "$description icon"
-                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                contentDescription = description
             }, LinearLayout.LayoutParams(dp(22), dp(22)))
-            item.addView(label(name, 10f, tint).apply {
+            item.addView(text(name, 11f, tint).apply {
                 gravity = Gravity.CENTER
                 if (selected) typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, dp(4), 0, 0)
             })
             bar.addView(item, LinearLayout.LayoutParams(0, -2, 1f))
         }
@@ -213,155 +261,293 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun home() {
-        page.addView(title("Good to have you here", 23f))
-        page.addView(paragraph("Your sound. Your stems."))
-        val chooser = column()
-        chooser.addView(title("Choose your audio", 18f))
-        chooser.addView(paragraph("Select an MP3, WAV, M4A or another Android-supported audio file."))
-        chooser.addView(button("Select audio file") { picker.launch(arrayOf("audio/*")) })
-        chooser.addView(paragraph(selectedName).apply { setTextColor(accent()) })
-        page.addView(card(chooser), space())
+        page.addView(heading("Separate your track", 27f))
+        page.addView(paragraph("Create two clean starting points from one song: vocals and instrumental."), margin(7, 20))
 
-        val studio = column()
-        studio.addView(title("Vocal separation", 19f))
-        studio.addView(paragraph("Separate your track into two audio stems: vocals and instrumental."))
-        val progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 1000; visibility = View.GONE
+        val choosePanel = vertical(18)
+        choosePanel.addView(text("SOURCE AUDIO", 11f, colorMuted()).apply {
+            letterSpacing = .08f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        choosePanel.addView(heading(if (selectedUri == null) "Choose a song" else selectedName, 17f))
+        choosePanel.addView(paragraph(if (selectedUri == null)
+            "Select an audio file from your device. MP3, WAV, M4A and other Android-supported formats are accepted."
+        else "Selected and ready to process."))
+        choosePanel.addView(button(if (selectedUri == null) "Choose audio file" else "Change audio file") {
+            picker.launch(arrayOf("audio/*"))
+        })
+        page.addView(card(choosePanel), margin(0, 14))
+
+        val processPanel = vertical(18)
+        processPanel.addView(heading("Vocal separation", 18f))
+        processPanel.addView(paragraph("Stemit separates the lead vocal from the backing instrumental. The original file is kept unchanged."))
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = progressValue
+            visibility = if (isProcessing) View.VISIBLE else View.GONE
         }
-        val status = paragraph("Ready when you are")
-        studio.addView(progress); studio.addView(status)
-        lateinit var start: MaterialButton
-        start = button("Separate audio", true) {
-            val uri = selectedUri
-            if (uri == null) {
-                Toast.makeText(this, "Select an audio file first.", Toast.LENGTH_SHORT).show()
-                return@button
-            }
-            start.isEnabled = false; progress.visibility = View.VISIBLE; status.text = "Preparing audio…"
-            val temp = File(cacheDir, "separated").apply { mkdirs() }
-            worker.execute {
-                try {
-                    val result = engine.separate(uri, temp) { p ->
-                        runOnUiThread {
-                            if (!isFinishing) { progress.progress = (p.fraction * 1000).toInt(); status.text = p.message }
-                        }
-                    }
-                    val library = File(filesDir, "library").apply { mkdirs() }
-                    val stamp = System.currentTimeMillis()
-                    val vocals = File(library, "vocals-$stamp.wav")
-                    val instrumental = File(library, "instrumental-$stamp.wav")
-                    result.vocalsFile.copyTo(vocals, overwrite = true)
-                    result.instrumentalFile.copyTo(instrumental, overwrite = true)
-                    runOnUiThread {
-                        if (!isFinishing) {
-                            start.isEnabled = true; progress.visibility = View.GONE; status.text = "Separation complete"
-                            resultDialog(vocals, instrumental, result.durationSeconds)
-                            notifySeparationComplete(vocals, instrumental)
-                        }
-                    }
-                } catch (e: OutOfMemoryError) {
-                    runOnUiThread {
-                        start.isEnabled = true; progress.visibility = View.GONE; status.text = "Not enough memory"
-                        info("Not enough memory", "Close other apps and try a shorter audio clip. The current separation model can be demanding on phones with 2 GB RAM.")
-                    }
-                } catch (e: Exception) {
-                    runOnUiThread {
-                        start.isEnabled = true; progress.visibility = View.GONE; status.text = "Separation could not finish"
-                        info("Separation failed", e.message ?: e.javaClass.simpleName)
-                    }
-                }
-            }
+        processPanel.addView(progressBar, margin(8, 8))
+        progressLabel = paragraph(progressMessage).apply { setPadding(0, dp(2), 0, dp(8)) }
+        processPanel.addView(progressLabel)
+        separateButton = button(if (isProcessing) "Separating…" else "Separate audio", true) {
+            startSeparation()
+        }.apply {
+            isEnabled = selectedUri != null && !isProcessing
+            alpha = if (isEnabled) 1f else .55f
         }
-        studio.addView(start)
-        page.addView(card(studio), space())
-        page.addView(button("Open Studio tools", false) { startActivity(Intent(this, StudioActivity::class.java)) }, space())
-        page.addView(section("Recent stems", "See all") { showTab("Library") }, space(0, 8))
-        val recent = files().take(2)
-        if (recent.isEmpty()) page.addView(paragraph("Your completed separations will appear here."))
-        else recent.forEach { page.addView(fileCard(it), space(0, 8)) }
+        processPanel.addView(separateButton)
+        page.addView(card(processPanel), margin(0, 14))
+
+        val modelText = if (engine.modelInstalled()) {
+            "Model downloaded · Ready for on-device processing"
+        } else {
+            "First use downloads the separation model (about 103 MB)"
+        }
+        page.addView(paragraph(modelText).apply {
+            textSize = 12f
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        })
     }
 
-    private fun search() {
-        page.addView(title("Search", 24f))
-        page.addView(paragraph("Find your saved stems and imported audio."))
-        val field = EditText(this).apply {
-            hint = "Search audio and stems"; setSingleLine(true); textSize = 15f
-            setTextColor(ink()); setHintTextColor(muted()); setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(surface()); cornerRadius = dp(12).toFloat(); setStroke(dp(1), border())
-            }
-            setText(query); imeOptions = EditorInfo.IME_ACTION_SEARCH
-            addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    query = s?.toString().orEmpty()
-                    val list = page.findViewWithTag<LinearLayout>("search_results") ?: return
-                    list.removeAllViews()
-                    val matches = files().filter { it.name.contains(query, true) }
-                    if (matches.isEmpty()) list.addView(paragraph(if (query.isBlank()) "No saved audio yet." else "No matching files."))
-                    else matches.forEach { list.addView(fileCard(it), space(0, 8)) }
+    private fun startSeparation() {
+        val uri = selectedUri ?: return
+        if (isProcessing) return
+        isProcessing = true
+        progressValue = 0
+        progressMessage = "Preparing audio…"
+        progressBar?.visibility = View.VISIBLE
+        progressBar?.progress = 0
+        progressLabel?.text = progressMessage
+        separateButton?.isEnabled = false
+        separateButton?.text = "Separating…"
+
+        worker.execute {
+            try {
+                val tempDir = File(cacheDir, "separated").apply { mkdirs() }
+                val result = engine.separate(uri, tempDir) { update ->
+                    runOnUiThread {
+                        progressValue = (update.fraction * 100).toInt().coerceIn(0, 100)
+                        progressMessage = update.message
+                        progressBar?.progress = progressValue
+                        progressLabel?.text = progressMessage
+                    }
                 }
-                override fun afterTextChanged(s: android.text.Editable?) {}
-            })
+                val library = File(filesDir, "library").apply { mkdirs() }
+                val stamp = System.currentTimeMillis()
+                val vocals = File(library, "vocals-$stamp.wav")
+                val instrumental = File(library, "instrumental-$stamp.wav")
+                result.vocalsFile.copyTo(vocals, overwrite = true)
+                result.instrumentalFile.copyTo(instrumental, overwrite = true)
+                runOnUiThread {
+                    isProcessing = false
+                    progressValue = 100
+                    progressMessage = "Separation complete"
+                    progressBar?.progress = 100
+                    progressLabel?.text = progressMessage
+                    separateButton?.isEnabled = selectedUri != null
+                    separateButton?.text = "Separate audio"
+                    showResults(vocals, instrumental, result.durationSeconds)
+                    sendCompletionNotification(vocals, instrumental)
+                }
+            } catch (e: OutOfMemoryError) {
+                runOnUiThread {
+                    isProcessing = false
+                    progressMessage = "This device ran out of memory before the separation finished."
+                    resetProcessingControls()
+                    showInfo("Separation stopped", "Stemit could not complete this file with the memory available. Your original audio has not been changed.")
+                }
+            } catch (e: Exception) {
+                runOnUiThread {
+                    isProcessing = false
+                    progressMessage = "Separation failed"
+                    resetProcessingControls()
+                    showInfo("Could not separate this track", e.message ?: e.javaClass.simpleName)
+                }
+            }
         }
-        page.addView(field, space(8, 14))
-        page.addView(title("Your files", 18f), space(0, 8))
-        val results = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; tag = "search_results" }
-        page.addView(results)
-        val matches = files().filter { it.name.contains(query, true) }
-        if (matches.isEmpty()) results.addView(paragraph("No saved audio yet. Separate a track or import audio in Library."))
-        else matches.forEach { results.addView(fileCard(it), space(0, 8)) }
+    }
+
+    private fun resetProcessingControls() {
+        progressLabel?.text = progressMessage
+        progressBar?.visibility = View.GONE
+        separateButton?.isEnabled = selectedUri != null
+        separateButton?.text = "Separate audio"
+    }
+
+    private fun showResults(vocals: File, instrumental: File, duration: Float) {
+        val content = vertical(18)
+        content.addView(paragraph(String.format(Locale.getDefault(), "Processed %.1f seconds of audio.", duration)))
+        content.addView(button("Play vocals", true) { play(vocals) })
+        content.addView(button("Play instrumental") { play(instrumental) }, margin(8, 0))
+        content.addView(button("Open Library") { render("Library") }, margin(8, 0))
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Your stems are ready")
+            .setView(content)
+            .setPositiveButton("Done", null)
+            .show()
     }
 
     private fun library() {
-        page.addView(title("Library", 24f))
-        page.addView(paragraph("Your saved stems and imported audio stay on this device."))
-        page.addView(button("Import audio", false) { importingToLibrary = true; picker.launch(arrayOf("audio/*")) }, space(8, 12))
-        val all = files()
-        page.addView(section("Saved audio", "Refresh") { showTab("Library") }, space(0, 8))
-        if (all.isEmpty()) {
-            val empty = column()
-            empty.addView(title("Your library is empty", 18f))
-            empty.addView(paragraph("Choose a track from Home and separate it. Your vocals and instrumental files will appear here."))
-            empty.addView(button("Choose audio", true) { showTab("Home") })
+        page.addView(heading("Library", 27f))
+        page.addView(paragraph("Your separated stems, saved on this device."), margin(7, 18))
+        val files = libraryFiles()
+        if (files.isEmpty()) {
+            val empty = vertical(20)
+            empty.addView(heading("No stems yet", 18f))
+            empty.addView(paragraph("When you separate a song, the vocals and instrumental files will appear here."))
+            empty.addView(button("Choose a song", true) { render("Home") }, margin(12, 0))
             page.addView(card(empty))
         } else {
-            all.forEach { page.addView(fileCard(it), space(0, 8)) }
-            page.addView(paragraph("Use Open to play, Share to export, or Studio to trim and adjust WAV volume."))
-            page.addView(button("Open full Library manager", false) { startActivity(Intent(this, LibraryActivity::class.java)) }, space())
-        }
-    }
-
-    private fun importToLibrary(uri: Uri) {
-        try {
-            val dir = File(filesDir, "library").apply { mkdirs() }
-            val displayName = contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) it.getString(0) else null
-            } ?: run {
-                val ext = android.webkit.MimeTypeMap.getSingleton().getExtensionFromMimeType(contentResolver.getType(uri)) ?: "wav"
-                "audio-${System.currentTimeMillis()}.$ext"
+            files.forEach { file ->
+                val panel = vertical(14)
+                val isVocal = file.name.startsWith("vocals-", true)
+                panel.addView(heading(if (isVocal) "Vocals" else if (file.name.startsWith("instrumental-", true)) "Instrumental" else file.name, 16f))
+                panel.addView(paragraph(file.name), margin(4, 2))
+                panel.addView(text(android.text.format.Formatter.formatShortFileSize(this, file.length()), 12f, colorMuted()))
+                val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+                actions.addView(button(if (playingFile == file && player?.isPlaying == true) "Pause" else "Play") {
+                    togglePlayback(file)
+                }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+                actions.addView(button("Share") { share(file) }, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+                actions.addView(button("Save") { exportFile = file; savePicker.launch(file.name) },
+                    LinearLayout.LayoutParams(0, -2, 1f))
+                panel.addView(actions, margin(10, 0))
+                page.addView(card(panel), margin(0, 10))
             }
-            val safeName = displayName.replace(Regex("[^A-Za-z0-9._ -]"), "_")
-            val target = File(dir, "${System.currentTimeMillis()}-$safeName")
-            contentResolver.openInputStream(uri)?.use { input -> target.outputStream().use { input.copyTo(it) } }
-                ?: error("Unable to read selected audio.")
-            importingToLibrary = false
-            Toast.makeText(this, "Added to your Library.", Toast.LENGTH_SHORT).show()
-            showTab("Library")
-        } catch (e: Exception) {
-            importingToLibrary = false
-            info("Import failed", e.message ?: "The audio file could not be imported.")
         }
     }
 
-    private fun notifySeparationComplete(vocals: File, instrumental: File) {
+    private fun settings() {
+        page.addView(heading("Settings", 27f))
+        page.addView(paragraph("Only the controls needed to run and manage Stemit."), margin(7, 18))
+
+        val appearance = vertical(16)
+        appearance.addView(heading("Appearance", 17f))
+        appearance.addView(SwitchMaterial(this).apply {
+            text = "Dark appearance"
+            setTextColor(colorText())
+            isChecked = isDark()
+            setOnCheckedChangeListener { _, enabled ->
+                prefs.edit().putBoolean("dark_theme", enabled).apply()
+                AppCompatDelegate.setDefaultNightMode(if (enabled) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
+            }
+        })
+        page.addView(card(appearance), margin(0, 10))
+
+        val storage = vertical(16)
+        storage.addView(heading("Model and storage", 17f))
+        storage.addView(paragraph("Separation model: " + if (engine.modelInstalled()) "Downloaded" else "Not downloaded"))
+        storage.addView(button("Remove downloaded model", false) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Remove model?")
+                .setMessage("The next separation will download the model again.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Remove") { _, _ ->
+                    val removed = engine.removeModel()
+                    showInfo("Model storage", if (removed) "Model removed." else "No model was removed.")
+                    render("Settings")
+                }.show()
+        }, margin(8, 0))
+        storage.addView(button("Clear temporary files", false) {
+            MaterialAlertDialogBuilder(this)
+                .setTitle("Clear temporary files?")
+                .setMessage("This removes temporary processing data only. Your saved stems will remain in the Library.")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Clear") { _, _ ->
+                    val temp = File(cacheDir, "separated")
+                    temp.listFiles()?.forEach { it.deleteRecursively() }
+                    showInfo("Temporary files", "Temporary processing files cleared.")
+                }.show()
+        }, margin(8, 0))
+        page.addView(card(storage), margin(0, 10))
+
+        val help = vertical(16)
+        help.addView(heading("Help", 17f))
+        help.addView(button("How Stemit works", false) {
+            showInfo("How Stemit works", "Choose one audio file, run separation, then play or save the two resulting WAV stems. Your original audio is not changed. The first run downloads the model; later processing is designed to run on this device.")
+        }, margin(8, 0))
+        help.addView(button("Privacy", false) {
+            showInfo("Privacy", "Your selected audio is processed on this device. Stemit does not upload your music to a Stemit server. The separation model is downloaded once and optional update checks require internet access.")
+        }, margin(8, 0))
+        help.addView(button("Contact developer", false) {
+            try {
+                startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:kastineaugak@gmail.com?subject=Stemit%20support")))
+            } catch (_: Exception) {
+                showInfo("Email unavailable", "Contact kastineaugak@gmail.com")
+            }
+        }, margin(8, 0))
+        help.addView(button("Check for updates", false) { checkUpdates() }, margin(8, 0))
+        page.addView(card(help), margin(0, 10))
+        page.addView(paragraph("Stemit · " + BuildConfig.VERSION_NAME).apply {
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(12), 0, dp(8))
+        })
+    }
+
+    private fun libraryFiles(): List<File> {
+        val dir = File(filesDir, "library").apply { mkdirs() }
+        return dir.listFiles()?.filter { it.isFile && it.extension.equals("wav", true) }
+            ?.sortedByDescending { it.lastModified() } ?: emptyList()
+    }
+
+    private fun displayName(uri: Uri): String {
+        return contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Selected audio"
+    }
+
+    private fun togglePlayback(file: File) {
+        if (playingFile == file && player != null) {
+            if (player?.isPlaying == true) player?.pause() else player?.start()
+            render("Library")
+            return
+        }
+        play(file)
+    }
+
+    private fun play(file: File) {
+        stopPlayback()
+        try {
+            player = MediaPlayer().apply {
+                setDataSource(file.absolutePath)
+                setOnCompletionListener { stopPlayback(); if (activeTab == "Library") render("Library") }
+                prepare()
+                start()
+            }
+            playingFile = file
+            if (activeTab == "Library") render("Library")
+        } catch (e: Exception) {
+            stopPlayback()
+            showInfo("Playback unavailable", "This audio file could not be played on this device.")
+        }
+    }
+
+    private fun stopPlayback() {
+        try { player?.stop() } catch (_: Exception) {}
+        player?.release()
+        player = null
+        playingFile = null
+    }
+
+    private fun share(file: File) {
+        val uri = FileProvider.getUriForFile(this, "${packageName}.files", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/wav"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        startActivity(Intent.createChooser(intent, "Share audio"))
+    }
+
+    private fun sendCompletionNotification(vocals: File, instrumental: File) {
+        if (!prefs.getBoolean("notifications", false)) return
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
         val manager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(
             android.app.NotificationChannel("stemit_results", "Separation results", android.app.NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "Notifies you when your audio stems are ready." }
         )
         val pending = android.app.PendingIntent.getActivity(
             this, 12, Intent(this, DashboardActivity::class.java),
@@ -369,220 +555,59 @@ class DashboardActivity : AppCompatActivity() {
         )
         manager.notify(12, NotificationCompat.Builder(this, "stemit_results")
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("Your Stemit stems are ready")
-            .setContentText("${vocals.name} and ${instrumental.name} were saved to your Library.")
+            .setContentTitle("Your stems are ready")
+            .setContentText("Vocals and instrumental files are saved in your Library.")
             .setContentIntent(pending).setAutoCancel(true).build())
     }
 
-    private fun files(): List<File> {
-        val dir = File(filesDir, "library").apply { mkdirs() }
-        return dir.listFiles()?.filter { it.isFile && it.extension.lowercase() in listOf("wav", "mp3", "m4a", "aac", "ogg", "flac") }
-            ?.sortedByDescending { it.lastModified() } ?: emptyList()
-    }
-
-    private fun fileCard(file: File): View {
-        val box = column()
-        box.addView(label(file.name, 14f))
-        box.addView(label(android.text.format.Formatter.formatShortFileSize(this, file.length()), 11f, muted()))
-        val actions = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        actions.addView(label("Open", 12f, accent()).apply {
-            setPadding(dp(5), dp(8), dp(14), dp(4)); setOnClickListener { openFile(file) }
-        })
-        actions.addView(label("Share", 12f, accent()).apply {
-            setPadding(dp(5), dp(8), dp(14), dp(4)); setOnClickListener { shareFile(file) }
-        })
-        actions.addView(label("Save copy", 12f, accent()).apply {
-            setPadding(dp(5), dp(8), dp(14), dp(4))
-            setOnClickListener { exportFile = file; savePicker.launch(file.name) }
-        })
-        actions.addView(label("Studio", 12f, accent()).apply {
-            setPadding(dp(5), dp(8), dp(14), dp(4))
-            setOnClickListener { startActivity(Intent(this@DashboardActivity, StudioActivity::class.java).putExtra("file", file.absolutePath)) }
-        })
-        box.addView(actions)
-        return card(box)
-    }
-
-    private fun premium() {
-        page.addView(title("Stemit Premium", 24f))
-        page.addView(paragraph("Optional upgrades for creators who need more from their audio workflow."))
-        val panel = column()
-        panel.addView(title("Support Stemit", 20f))
-        panel.addView(paragraph("Core vocal and instrumental separation remains available without a subscription. Premium purchasing is not enabled in this build."))
-        panel.addView(paragraph("Planned benefits"))
-        listOf("Batch processing", "Additional export controls", "More audio workflow tools", "Support for continued development").forEach {
-            panel.addView(paragraph("•  $it"))
-        }
-        page.addView(card(panel), space(8, 12))
-        page.addView(paragraph("No payment will be requested from this screen. Verified plans and billing will be added only when ready."))
-    }
-
-    private fun settings() {
-        page.addView(title("Settings", 24f))
-        page.addView(paragraph("Make Stemit work the way you prefer."))
-        val appearance = column()
-        appearance.addView(title("Appearance", 17f))
-        appearance.addView(SwitchMaterial(this).apply {
-            text = "Dark theme"; setTextColor(ink()); isChecked = dark()
-            setOnCheckedChangeListener { _, enabled ->
-                prefs.edit().putBoolean("dark_theme", enabled).apply()
-                AppCompatDelegate.setDefaultNightMode(if (enabled) AppCompatDelegate.MODE_NIGHT_YES else AppCompatDelegate.MODE_NIGHT_NO)
-            }
-        })
-        page.addView(card(appearance), space(8, 10))
-
-        val preferences = column()
-        preferences.addView(title("App preferences", 17f))
-        preferences.addView(SwitchMaterial(this).apply {
-            text = "Notifications"; setTextColor(ink()); isChecked = prefs.getBoolean("notifications", false)
-            setOnCheckedChangeListener { _, enabled ->
-                prefs.edit().putBoolean("notifications", enabled).apply()
-                if (enabled) requestNotifications()
-            }
-        })
-        preferences.addView(paragraph("Separation model: " + (if (engine.modelInstalled()) "Downloaded and ready" else "Not downloaded yet")))
-        preferences.addView(button("Remove downloaded model", false) {
-            androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Remove separation model?")
-                .setMessage("This frees model storage. The next separation will download the model again.")
-                .setNegativeButton("Cancel", null).setPositiveButton("Remove") { _, _ ->
-                    val removed = engine.removeModel()
-                    info("Model storage", if (removed) "Downloaded model removed." else "Could not remove the model.")
-                }.show()
-        })
-        preferences.addView(button("Storage and cache", false) {
-            val bytes = cacheDir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-            info("Storage and cache", "Temporary cache currently uses " + android.text.format.Formatter.formatShortFileSize(this, bytes) + ". Saved stems are kept in your Library.")
-        })
-        preferences.addView(button("Clear temporary cache", false) {
-            androidx.appcompat.app.AlertDialog.Builder(this).setTitle("Clear temporary cache?")
-                .setMessage("Temporary processing files will be removed. Saved stems in your Library will remain.")
-                .setNegativeButton("Cancel", null)
-                .setPositiveButton("Clear") { _, _ ->
-                    cacheDir.listFiles()?.forEach { it.deleteRecursively() }
-                    Toast.makeText(this, "Temporary cache cleared.", Toast.LENGTH_SHORT).show()
-                }.show()
-        })
-        page.addView(card(preferences), space(0, 10))
-
-        val help = column()
-        help.addView(title("Help and information", 17f))
-        help.addView(button("FAQ and Help", false) { faq() })
-        help.addView(button("About Stemit", false) { about() })
-        help.addView(button("Terms of use", false) { info("Terms of use", "Use Stemit only with audio you own or have permission to process. You are responsible for respecting copyright and licensing. Stemit is provided as-is; processing results may vary by recording and device.") })
-        help.addView(button("Privacy policy", false) { info("Privacy policy", "Stemit processes selected audio on your device after downloading its separation model. The app does not upload selected music to a Stemit server. Model downloads and optional update checks require internet access. Files remain in app storage unless you choose to share them.") })
-        help.addView(button("Open-source licences", false) { openUrl("https://github.com/Augak/Stemit") })
-        help.addView(button("Contact developer", false) { contact() })
-        help.addView(button("More from the developer", false) { openUrl("https://github.com/Augak") })
-        help.addView(button("Check for updates", false) { checkUpdates() })
-        page.addView(card(help), space())
-        page.addView(paragraph("Version " + BuildConfig.VERSION_NAME))
-    }
-
-    private fun section(text: String, action: String, callback: () -> Unit): View {
-        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        row.addView(title(text, 18f), LinearLayout.LayoutParams(0, -2, 1f))
-        row.addView(label("$action  ›", 13f, accent()).apply { setOnClickListener { callback() } })
-        return row
-    }
-
-    private fun menu(itAnchor: View) {
-        val popup = PopupMenu(this, itAnchor)
-        popup.menu.add("FAQ & Help").setOnMenuItemClickListener { faq(); true }
-        popup.menu.add("About Stemit").setOnMenuItemClickListener { about(); true }
-        popup.menu.add("Studio tools").setOnMenuItemClickListener { startActivity(Intent(this, StudioActivity::class.java)); true }
-        popup.menu.add("Check for updates").setOnMenuItemClickListener { checkUpdates(); true }
-        popup.menu.add("Contact developer").setOnMenuItemClickListener { contact(); true }
-        popup.show()
-    }
-
-    private fun resultDialog(vocals: File, instrumental: File, duration: Float) {
-        val box = column()
-        box.addView(paragraph("Processed " + String.format("%.1f", duration) + " seconds."))
-        box.addView(button("Open vocals", true) { openFile(vocals) })
-        box.addView(button("Open instrumental") { openFile(instrumental) })
-        box.addView(button("Share vocals") { shareFile(vocals) })
-        box.addView(button("Share instrumental") { shareFile(instrumental) })
-        box.addView(button("Save vocals to device") { exportFile = vocals; savePicker.launch(vocals.name) })
-        box.addView(button("Save instrumental to device") { exportFile = instrumental; savePicker.launch(instrumental.name) })
-        MaterialAlertDialogBuilder(this).setTitle("Your stems are ready").setView(box)
-            .setPositiveButton("View Library") { _, _ -> showTab("Library") }.show()
-    }
-
-    private fun openFile(file: File) {
-        val uri = FileProvider.getUriForFile(this, "${packageName}.files", file)
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, if (file.extension.equals("wav", true)) "audio/wav" else "audio/*")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try { startActivity(intent) } catch (_: Exception) { info("No audio player", "Install or enable an audio player to open this file.") }
-    }
-
-    private fun shareFile(file: File) {
-        val uri = FileProvider.getUriForFile(this, "${packageName}.files", file)
-        val intent = Intent(Intent.ACTION_SEND).apply {
-            type = "audio/*"; putExtra(Intent.EXTRA_STREAM, uri); addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        try { startActivity(Intent.createChooser(intent, "Share audio")) }
-        catch (_: Exception) { info("Unable to share", "This file could not be shared right now.") }
-    }
-
-    private fun askNotificationPermissionOnce() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
-            !prefs.getBoolean("notification_prompted", false)
-        ) {
-            prefs.edit().putBoolean("notification_prompted", true).apply()
-            requestNotifications()
-        }
-    }
-    private fun requestNotifications() {
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-    }
-    private fun contact() {
-        val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:kastineaugak@gmail.com?subject=Stemit%20support"))
-        try { startActivity(intent) } catch (_: Exception) { info("Email unavailable", "Contact kastineaugak@gmail.com") }
-    }
-    private fun faq() = info("FAQ & Help", "Stemit separates a supported audio track into vocals and instrumental WAV files.\n\nAfter the first model download, separation is designed to run on your phone without uploading your audio.\n\nThe model is about 103 MB. The neural model needs memory, so close background apps and try a shorter clip if processing fails.\n\nNeed help? Contact the developer from Settings.")
-    private fun about() = info("About Stemit", "Stemit · Version " + BuildConfig.VERSION_NAME + "\n\nYour sound. Your stems.\n\nA mobile audio tool for separating vocals and instrumentals. Built by Kastine Augak.")
-    private fun info(title: String, message: String) {
-        MaterialAlertDialogBuilder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show()
-    }
-    private fun openUrl(url: String) {
-        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) { info("Unable to open link", url) }
-    }
     private fun checkUpdates() {
-        Toast.makeText(this, "Checking for Stemit updates…", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, "Checking for updates…", Toast.LENGTH_SHORT).show()
         worker.execute {
             var connection: HttpURLConnection? = null
             try {
                 connection = (URL("https://api.github.com/repos/Augak/Stemit/releases/latest").openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 12000; readTimeout = 12000; setRequestProperty("Accept", "application/vnd.github+json")
+                    connectTimeout = 12000
+                    readTimeout = 12000
+                    setRequestProperty("Accept", "application/vnd.github+json")
                 }
                 if (connection.responseCode == 404) {
-                    runOnUiThread { info("No release published yet", "There is no official Stemit release published yet. Visit the Releases page to check pre-releases.") }
+                    runOnUiThread { showInfo("No release yet", "There is no official Stemit release published yet.") }
                 } else {
-                    check(connection.responseCode in 200..299) { "Update check returned HTTP " + connection.responseCode }
+                    check(connection.responseCode in 200..299) { "Update check returned HTTP ${connection.responseCode}" }
                     val json = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
                     val tag = json.optString("tag_name", "latest")
                     val pageUrl = json.optString("html_url", "https://github.com/Augak/Stemit/releases")
                     runOnUiThread {
-                        if (tag.trimStart('v') == BuildConfig.VERSION_NAME.trimStart('v')) info("You're up to date", "Installed version: " + BuildConfig.VERSION_NAME + "\nLatest release: $tag")
-                        else MaterialAlertDialogBuilder(this).setTitle("Stemit update available")
-                            .setMessage("Latest version: $tag\nOpen the official release page to download the update.")
-                            .setPositiveButton("View update") { _, _ -> openUrl(pageUrl) }.setNegativeButton("Later", null).show()
+                        if (tag.trimStart('v') == BuildConfig.VERSION_NAME.trimStart('v')) {
+                            showInfo("You're up to date", "Installed version: ${BuildConfig.VERSION_NAME}")
+                        } else {
+                            MaterialAlertDialogBuilder(this).setTitle("Update available")
+                                .setMessage("A newer version ($tag) is available.")
+                                .setPositiveButton("View release") { _, _ -> openUrl(pageUrl) }
+                                .setNegativeButton("Later", null).show()
+                        }
                     }
                 }
             } catch (e: Exception) {
-                runOnUiThread { info("Update check failed", e.message ?: "Please try again later.") }
-            } finally { connection?.disconnect() }
+                runOnUiThread { showInfo("Update check failed", e.message ?: "Try again later.") }
+            } finally {
+                connection?.disconnect()
+            }
         }
     }
 
+    private fun openUrl(url: String) {
+        try { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+        catch (_: Exception) { showInfo("Unable to open link", url) }
+    }
+
+    private fun showInfo(title: String, message: String) {
+        MaterialAlertDialogBuilder(this).setTitle(title).setMessage(message).setPositiveButton("OK", null).show()
+    }
+
     override fun onDestroy() {
-        ui.removeCallbacksAndMessages(null)
         worker.shutdownNow()
+        stopPlayback()
         super.onDestroy()
     }
 }
