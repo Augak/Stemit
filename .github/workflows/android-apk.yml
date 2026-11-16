@@ -71,6 +71,7 @@ jobs:
           tag_name: v1.1.1
           name: Stemit v1.1.1 Preview
           prerelease: true
+          make_latest: false
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: dist/*.apk
@@ -80,3 +81,5 @@ jobs:
             app-debug.apk is signed with the CI debug key and intended for direct device testing.
             Release APKs are unsigned and require the publisher signing key before installation or store distribution.
             Physical-device testing, especially on 2 GB RAM phones, remains necessary.
+
+# Preview release is intentionally marked pre-release until physical-device testing is complete.
