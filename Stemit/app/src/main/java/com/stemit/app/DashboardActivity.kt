@@ -412,6 +412,17 @@ class DashboardActivity : AppCompatActivity() {
                 actions.addView(button("Save") { exportFile = file; savePicker.launch(file.name) },
                     LinearLayout.LayoutParams(0, -2, 1f))
                 panel.addView(actions, margin(10, 0))
+                panel.addView(button("Delete from Library", false) {
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle("Delete this stem?")
+                        .setMessage("This removes the saved copy from Stemit. Your original source audio is not affected.")
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Delete") { _, _ ->
+                            if (playingFile == file) stopPlayback()
+                            file.delete()
+                            render("Library")
+                        }.show()
+                }, margin(8, 0))
                 page.addView(card(panel), margin(0, 10))
             }
         }
