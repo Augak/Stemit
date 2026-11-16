@@ -19,6 +19,7 @@ jobs:
   android-ui:
     name: Android emulator navigation checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -40,4 +41,5 @@ jobs:
           api-level: 34
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -no-audio -no-boot-anim -memory 2048
           script: gradle -p Stemit :app:connectedDebugAndroidTest --stacktrace
