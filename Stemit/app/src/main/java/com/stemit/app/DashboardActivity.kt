@@ -46,6 +46,8 @@ class DashboardActivity : AppCompatActivity() {
     private var exportFile: File? = null
     private var player: MediaPlayer? = null
     private var playingFile: File? = null
+    private var sourcePreviewPrepared = false
+    private var sourcePreviewButton: MaterialButton? = null
     private var activeTab = "Home"
     private lateinit var page: LinearLayout
     private var progressBar: ProgressBar? = null
@@ -54,6 +56,7 @@ class DashboardActivity : AppCompatActivity() {
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
+            stopPlayback()
             selectedUri = uri
             selectedName = displayName(uri)
             render("Home")
@@ -276,6 +279,10 @@ class DashboardActivity : AppCompatActivity() {
         choosePanel.addView(button(if (selectedUri == null) "Choose audio file" else "Change audio file") {
             picker.launch(arrayOf("audio/*"))
         })
+        sourcePreviewButton = if (selectedUri != null) button(
+            if (player != null && playingFile == null && player?.isPlaying == true) "Pause preview" else "Preview selected audio"
+        ) { previewSelectedAudio() } else null
+        sourcePreviewButton?.let { choosePanel.addView(it, margin(8, 0)) }
         page.addView(card(choosePanel), margin(0, 14))
 
         val processPanel = vertical(18)
@@ -526,6 +533,58 @@ class DashboardActivity : AppCompatActivity() {
         } ?: uri.lastPathSegment?.substringAfterLast('/') ?: "Selected audio"
     }
 
+    private fun previewSelectedAudio() {
+        val uri = selectedUri ?: return
+        val current = player
+        if (current != null && playingFile == null) {
+            try {
+                if (current.isPlaying) {
+                    current.pause()
+                    sourcePreviewButton?.text = "Resume preview"
+                } else if (sourcePreviewPrepared) {
+                    current.start()
+                    sourcePreviewButton?.text = "Pause preview"
+                }
+            } catch (_: IllegalStateException) {
+                stopPlayback()
+                sourcePreviewButton?.text = "Preview selected audio"
+            }
+            return
+        }
+        stopPlayback()
+        try {
+            val media = MediaPlayer()
+            player = media
+            playingFile = null
+            sourcePreviewPrepared = false
+            sourcePreviewButton?.isEnabled = false
+            media.setDataSource(this, uri)
+            media.setOnPreparedListener {
+                sourcePreviewPrepared = true
+                sourcePreviewButton?.isEnabled = true
+                it.start()
+                sourcePreviewButton?.text = "Pause preview"
+            }
+            media.setOnCompletionListener {
+                stopPlayback()
+                sourcePreviewButton?.text = "Preview selected audio"
+            }
+            media.setOnErrorListener { _, _, _ ->
+                stopPlayback()
+                sourcePreviewButton?.isEnabled = true
+                sourcePreviewButton?.text = "Preview selected audio"
+                showInfo("Preview unavailable", "This audio file could not be previewed on this device.")
+                true
+            }
+            media.prepareAsync()
+        } catch (_: Exception) {
+            stopPlayback()
+            sourcePreviewButton?.isEnabled = true
+            sourcePreviewButton?.text = "Preview selected audio"
+            showInfo("Preview unavailable", "This audio file could not be previewed on this device.")
+        }
+    }
+
     private fun togglePlayback(file: File) {
         if (playingFile == file && player != null) {
             if (player?.isPlaying == true) player?.pause() else player?.start()
@@ -567,6 +626,7 @@ class DashboardActivity : AppCompatActivity() {
         player?.release()
         player = null
         playingFile = null
+        sourcePreviewPrepared = false
     }
 
     private fun share(file: File) {
