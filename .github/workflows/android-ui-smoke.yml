@@ -1,0 +1,43 @@
+name: Stemit Android UI smoke tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Stemit/**"
+      - ".github/workflows/android-ui-smoke.yml"
+  pull_request:
+    paths:
+      - "Stemit/**"
+      - ".github/workflows/android-ui-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android-ui:
+    name: Android emulator navigation checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.2.1
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: "8.2.1"
+
+      - name: Run Android UI smoke test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_2
+          script: gradle -p Stemit :app:connectedDebugAndroidTest --stacktrace
