@@ -42,6 +42,28 @@ class AudioDecoder(private val context: Context) {
             val sourceChannels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             require(sourceChannels >= 1) { "The audio file has no channels." }
             writer = StreamingResampler(output, sourceRate, targetRate)
+
+            // PCM WAV files are already decoded. Passing audio/raw to MediaCodec is
+            // not supported by every Android vendor, so stream these samples directly.
+            if (mime == "audio/raw") {
+                val encoding = if (format.containsKey(MediaFormat.KEY_PCM_ENCODING)) {
+                    format.getInteger(MediaFormat.KEY_PCM_ENCODING)
+                } else {
+                    AudioFormat.ENCODING_PCM_16BIT
+                }
+                val rawBuffer = ByteBuffer.allocateDirect(1024 * 1024).order(ByteOrder.LITTLE_ENDIAN)
+                while (true) {
+                    rawBuffer.clear()
+                    val size = extractor.readSampleData(rawBuffer, 0)
+                    if (size < 0) break
+                    rawBuffer.position(0)
+                    rawBuffer.limit(size)
+                    streamPcm(rawBuffer, sourceChannels, encoding, writer)
+                    extractor.advance()
+                }
+                return writer.finish()
+            }
+
             codec = MediaCodec.createDecoderByType(mime)
             codec.configure(format, null, null, 0)
             codec.start()
