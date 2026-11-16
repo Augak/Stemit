@@ -1,44 +1,41 @@
-# Stemit — Android audio studio
+# Stemit — Vocal & Instrumental Separator
 
-Stemit separates a selected audio track into vocals and instrumental stems using on-device ONNX inference.
+Stemit has one purpose: separate a selected song into two WAV files — vocals and instrumental.
 
-## Current development build
+## Focused app experience
 
-- Version: 1.0.3 (version code 4)
-- Minimum Android: 7.0 (API 24)
-- Separation model: BS PolarFormer FP16, downloaded on first use (~103 MB)
-- Audio processing: on-device after the model download
-- Library: persistent private storage for separated stems and imported audio
-- Studio: WAV trim and gain editing for 16-bit PCM mono/stereo files
-- Sharing and export: Android Sharesheet plus Save a copy through Android's system document picker
+- Choose one audio file using Android's system file picker.
+- Separate it into vocals and instrumental stems.
+- Play, save or share the resulting WAV files.
+- Keep completed stems in a simple on-device Library.
+- Change light/dark appearance and manage the downloaded model and temporary files.
 
-## Storage and memory
+There is no account, subscription screen, search tab, generic audio editor, converter, or unrelated studio feature in the focused app experience.
 
-The model is stored in the app's private files directory and is not bundled into the APK. The Library stores saved audio in app-private storage. Deleting the app removes these private files unless Android backs them up.
+## Processing and memory
 
-The inference chunk size has been reduced, but the engine still holds the decoded source and multiple full-track PCM arrays. This build does **not** guarantee reliable separation on every 2 GB RAM phone. Try shorter tracks and close other apps if memory is low. A true streaming decoder/inference/writer pipeline remains future work.
+The audio engine decodes the selected track to a temporary PCM file instead of keeping the complete decoded song in memory. It runs inference on fixed-size overlapping windows and writes both WAV stems progressively. Working audio memory is therefore bounded by the inference window rather than growing with the full track duration.
 
-## Features and limitations
+The ONNX model is downloaded on first use (approximately 103 MB) and stored separately from the APK. The app uses one ONNX inference thread to reduce CPU and memory pressure on entry-level Android devices. Actual speed and memory use still depend on the device, Android version, model runtime and source audio. A successful build or emulator UI test does not prove reliable separation on every 2 GB phone; physical-device audio testing remains required.
 
-- Home: choose an audio file and separate vocals/instrumental.
-- Library: import audio, play supported formats, share, open in Studio, or delete saved items.
-- Studio: trim and change gain on 16-bit PCM WAV. It does not currently convert compressed formats or merge tracks.
-- Settings: light/dark appearance, notification permission, model storage controls, temporary cache cleanup and update check.
-- Home-screen widget: quick access to Home and Library. Add it by long-pressing the Android home screen, opening Widgets, and selecting Stemit.
-- Help/About: in-app FAQ, developer contact and privacy/licence summary.
-- Premium: purchase and trial enforcement are not active; no payment is collected by this build.
-- Language: the current UI is English-only; localization is not yet complete.
+## Privacy
+
+Selected audio is processed locally. Stemit does not upload the selected song to a Stemit server. The model download and optional update check require internet access. Original audio is not overwritten.
 
 ## Build
 
-The GitHub Actions workflow builds debug APKs. For a release build with Java 17:
+The GitHub Actions workflow builds debug APKs:
 
 ```bash
-gradle -p Stemit :app:assembleRelease
+gradle -p Stemit :app:assembleDebug
 ```
 
-Release outputs include ABI-specific APKs and a universal APK.
+The Android emulator UI smoke test checks the welcome screen and Home, Library and Settings navigation:
+
+```bash
+gradle -p Stemit :app:connectedDebugAndroidTest
+```
 
 ## Model and third-party attribution
 
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and verify upstream terms before redistribution or commercial use.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Confirm the model's upstream licence before redistribution or commercial release.
