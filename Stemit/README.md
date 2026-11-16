@@ -24,13 +24,13 @@ Selected audio is processed locally. Stemit does not upload the selected song to
 
 ## Build
 
-The GitHub Actions workflow builds debug APKs:
+The GitHub Actions workflow builds minified release APKs for ARM64 and ARMv7 devices:
 
 ```bash
-gradle -p Stemit :app:assembleDebug
+gradle -p Stemit :app:assembleRelease
 ```
 
-The Android emulator UI smoke test checks the welcome screen and Home, Library and Settings navigation:
+The Android emulator checks Home, Library and Settings navigation and runs a model-backed five-second audio separation test on a 2 GB emulator:
 
 ```bash
 gradle -p Stemit :app:connectedDebugAndroidTest
