@@ -461,6 +461,24 @@ class DashboardActivity : AppCompatActivity() {
         }, margin(8, 0))
         page.addView(card(storage), margin(0, 10))
 
+        val notifications = vertical(16)
+        notifications.addView(heading("Completion alerts", 17f))
+        notifications.addView(SwitchMaterial(this).apply {
+            text = "Notify me when stems are ready"
+            setTextColor(colorText())
+            isChecked = prefs.getBoolean("notifications", false)
+            setOnCheckedChangeListener { _, enabled ->
+                if (enabled && Build.VERSION.SDK_INT >= 33 &&
+                    ContextCompat.checkSelfPermission(this@DashboardActivity, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                } else {
+                    prefs.edit().putBoolean("notifications", enabled).apply()
+                }
+            }
+        })
+        page.addView(card(notifications), margin(0, 10))
+
         val help = vertical(16)
         help.addView(heading("Help", 17f))
         help.addView(button("How Stemit works", false) {
@@ -509,15 +527,25 @@ class DashboardActivity : AppCompatActivity() {
     private fun play(file: File) {
         stopPlayback()
         try {
-            player = MediaPlayer().apply {
-                setDataSource(file.absolutePath)
-                setOnCompletionListener { stopPlayback(); if (activeTab == "Library") render("Library") }
-                prepare()
-                start()
-            }
+            val media = MediaPlayer()
+            player = media
             playingFile = file
-            if (activeTab == "Library") render("Library")
-        } catch (e: Exception) {
+            media.setDataSource(file.absolutePath)
+            media.setOnPreparedListener {
+                it.start()
+                if (activeTab == "Library" && !isFinishing) render("Library")
+            }
+            media.setOnCompletionListener {
+                stopPlayback()
+                if (activeTab == "Library" && !isFinishing) render("Library")
+            }
+            media.setOnErrorListener { _, _, _ ->
+                stopPlayback()
+                if (!isFinishing) showInfo("Playback unavailable", "This audio file could not be played on this device.")
+                true
+            }
+            media.prepareAsync()
+        } catch (_: Exception) {
             stopPlayback()
             showInfo("Playback unavailable", "This audio file could not be played on this device.")
         }
@@ -537,7 +565,11 @@ class DashboardActivity : AppCompatActivity() {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        startActivity(Intent.createChooser(intent, "Share audio"))
+        try {
+            startActivity(Intent.createChooser(intent, "Share audio"))
+        } catch (_: Exception) {
+            showInfo("Unable to share", "No compatible app could receive this audio file.")
+        }
     }
 
     private fun sendCompletionNotification(vocals: File, instrumental: File) {
