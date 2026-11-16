@@ -7,47 +7,77 @@ on:
     paths:
       - "Stemit/**"
       - ".github/workflows/android-apk.yml"
-  pull_request:
-    paths:
-      - "Stemit/**"
-      - ".github/workflows/android-apk.yml"
+      - "README.md"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-debug-apk:
-    name: Build native Android APK
+  build-apks:
+    name: Build debug and release APKs
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v4
-
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
-
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
-
       - name: Set up Gradle 8.2.1
-        uses: gradle/actions/setup-gradle@v6
+        uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.2.1"
-
-      - name: Build Stemit release APKs
-        run: gradle -p Stemit :app:assembleRelease --stacktrace
-
-      - name: Upload installable release APKs
+      - name: Build debug and optimized release APKs
+        run: gradle -p Stemit :app:assembleDebug :app:assembleRelease --stacktrace
+      - name: Stage APK files
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find Stemit/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -exec cp {} dist/ \;
+          find Stemit/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -exec cp {} dist/ \;
+          echo "APK files staged:"
+          ls -lh dist/
+          test -n "$(find dist -maxdepth 1 -type f -name '*.apk' -print -quit)"
+      - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: stemit-release-apks
-          path: |
-            Stemit/app/build/outputs/apk/release/app-arm64-v8a-release*.apk
-            Stemit/app/build/outputs/apk/release/app-armeabi-v7a-release*.apk
+          name: stemit-apk-artifacts
+          path: dist/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+
+  publish-preview-release:
+    name: Publish GitHub preview release
+    needs: build-apks
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download APKs from successful build
+        uses: actions/download-artifact@v4
+        with:
+          name: stemit-apk-artifacts
+          path: dist
+      - name: Publish versioned preview release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.1
+          name: Stemit v1.1.1 Preview
+          prerelease: true
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/*.apk
+          body: |
+            Stemit v1.1.1 preview release.
+
+            app-debug.apk is signed with the CI debug key and intended for direct device testing.
+            Release APKs are unsigned and require the publisher signing key before installation or store distribution.
+            Physical-device testing, especially on 2 GB RAM phones, remains necessary.
