@@ -1,9 +1,9 @@
 <resources>
-    <color name="stemit_background">#101820</color>
-    <color name="stemit_surface">#1B2833</color>
-    <color name="stemit_text">#F1F5F8</color>
-    <color name="stemit_muted">#B3C0CA</color>
-    <color name="stemit_outline">#344451</color>
-    <color name="stemit_accent">#62D6D0</color>
-    <color name="stemit_primary">#F1F5F8</color>
+    <color name="stemit_background">#101114</color>
+    <color name="stemit_surface">#1B1D21</color>
+    <color name="stemit_text">#F5F5F2</color>
+    <color name="stemit_muted">#ADB1B8</color>
+    <color name="stemit_outline">#30343A</color>
+    <color name="stemit_accent">#8FD9D1</color>
+    <color name="stemit_primary">#8FD9D1</color>
 </resources>
