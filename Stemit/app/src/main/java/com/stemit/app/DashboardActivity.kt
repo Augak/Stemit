@@ -51,8 +51,12 @@ class DashboardActivity : AppCompatActivity() {
     private var activeTab = "Home"
     private lateinit var page: LinearLayout
     private var progressBar: ProgressBar? = null
+    private var progressSpinner: ProgressBar? = null
     private var progressLabel: TextView? = null
     private var separateButton: MaterialButton? = null
+    private var resultVocalsFile: File? = null
+    private var resultInstrumentalFile: File? = null
+    private var resultDurationSeconds: Float = 0f
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -163,7 +167,7 @@ class DashboardActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             textAlignment = View.TEXT_ALIGNMENT_CENTER
         })
-        root.addView(paragraph("The first use downloads the separation model (about 103 MB). Your selected audio is processed on this device.").apply {
+        root.addView(paragraph("The first use downloads the separation model (about 103 MiB). Your selected audio is processed on this device.").apply {
             gravity = Gravity.CENTER
             textAlignment = View.TEXT_ALIGNMENT_CENTER
             setPadding(0, dp(12), 0, dp(22))
@@ -211,6 +215,8 @@ class DashboardActivity : AppCompatActivity() {
             "Home" -> home()
             "Library" -> library()
             "Settings" -> settings()
+            "Processing" -> processingScreen()
+            "Results" -> resultsScreen()
         }
         page.alpha = 0f
         page.translationY = dp(5).toFloat()
@@ -246,7 +252,7 @@ class DashboardActivity : AppCompatActivity() {
                 isFocusable = true
                 contentDescription = description
                 setPadding(dp(8), dp(5), dp(8), dp(4))
-                setOnClickListener { if (!isProcessing || name == "Home") render(name) }
+                setOnClickListener { if (!isProcessing) render(name) }
             }
             item.addView(ImageView(this).apply {
                 setImageResource(icon)
@@ -308,7 +314,7 @@ class DashboardActivity : AppCompatActivity() {
         val modelText = if (engine.modelInstalled()) {
             "Model downloaded · Ready for on-device processing"
         } else {
-            "First use downloads the separation model (about 103 MB)"
+            "First use downloads the separation model (about 103 MiB)"
         }
         page.addView(paragraph(modelText).apply {
             textSize = 12f
@@ -322,11 +328,7 @@ class DashboardActivity : AppCompatActivity() {
         isProcessing = true
         progressValue = 0
         progressMessage = "Preparing audio…"
-        progressBar?.visibility = View.VISIBLE
-        progressBar?.progress = 0
-        progressLabel?.text = progressMessage
-        separateButton?.isEnabled = false
-        separateButton?.text = "Separating…"
+        render("Processing")
 
         worker.execute {
             try {
@@ -337,6 +339,7 @@ class DashboardActivity : AppCompatActivity() {
                         progressMessage = update.message
                         progressBar?.progress = progressValue
                         progressLabel?.text = progressMessage
+                        progressLabel?.contentDescription = progressMessage
                     }
                 }
                 val library = File(filesDir, "library").apply { mkdirs() }
@@ -349,10 +352,6 @@ class DashboardActivity : AppCompatActivity() {
                     isProcessing = false
                     progressValue = 100
                     progressMessage = "Separation complete"
-                    progressBar?.progress = 100
-                    progressLabel?.text = progressMessage
-                    separateButton?.isEnabled = selectedUri != null
-                    separateButton?.text = "Separate audio"
                     showResults(vocals, instrumental, result.durationSeconds)
                     sendCompletionNotification(vocals, instrumental)
                 }
@@ -360,38 +359,107 @@ class DashboardActivity : AppCompatActivity() {
                 runOnUiThread {
                     isProcessing = false
                     progressMessage = "This device ran out of memory before the separation finished."
-                    resetProcessingControls()
-                    showInfo("Separation stopped", "Stemit could not complete this file with the memory available. Your original audio has not been changed.")
+                    render("Home")
+                    showInfo("Separation stopped", "Stemit stopped before saving incomplete stems. Close other apps, restart your phone, and try a shorter audio file. Your original audio is unchanged.")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     isProcessing = false
                     progressMessage = "Separation failed"
-                    resetProcessingControls()
+                    render("Home")
                     showInfo("Could not separate this track", e.message ?: e.javaClass.simpleName)
                 }
             }
         }
     }
 
-    private fun resetProcessingControls() {
-        progressLabel?.text = progressMessage
-        progressBar?.visibility = View.GONE
-        separateButton?.isEnabled = selectedUri != null
-        separateButton?.text = "Separate audio"
+    private fun showResults(vocals: File, instrumental: File, duration: Float) {
+        resultVocalsFile = vocals
+        resultInstrumentalFile = instrumental
+        resultDurationSeconds = duration
+        render("Results")
     }
 
-    private fun showResults(vocals: File, instrumental: File, duration: Float) {
-        val content = vertical(18)
-        content.addView(paragraph(String.format(Locale.getDefault(), "Processed %.1f seconds of audio.", duration)))
-        content.addView(button("Play vocals", true) { play(vocals) })
-        content.addView(button("Play instrumental") { play(instrumental) }, margin(8, 0))
-        content.addView(button("Open Library") { render("Library") }, margin(8, 0))
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Your stems are ready")
-            .setView(content)
-            .setPositiveButton("Done", null)
-            .show()
+    private fun processingScreen() {
+        page.addView(text("STEMIT  /  PROCESSING", 11f, colorAccent()).apply {
+            letterSpacing = .08f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        page.addView(heading("Creating your stems", 27f), margin(8, 6))
+        page.addView(paragraph("Keep Stemit open while the model separates the vocal and instrumental tracks."), margin(0, 20))
+
+        val panel = vertical(20)
+        progressSpinner = ProgressBar(this).apply {
+            isIndeterminate = true
+            contentDescription = "Audio separation is running"
+        }
+        panel.addView(progressSpinner, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
+        progressLabel = paragraph(progressMessage).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            contentDescription = progressMessage
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        panel.addView(progressLabel, margin(10, 8))
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = progressValue
+            isIndeterminate = false
+        }
+        panel.addView(progressBar, margin(0, 6))
+        panel.addView(text("$progressValue%", 13f, colorMuted()).apply {
+            gravity = Gravity.END
+        })
+        page.addView(card(panel), margin(0, 16))
+        page.addView(paragraph("Your original audio is never overwritten. Stems are saved to your private Library only after processing succeeds."))
+    }
+
+    private fun resultsScreen() {
+        val vocals = resultVocalsFile ?: run {
+            page.addView(heading("No results yet", 22f))
+            page.addView(button("Back to Home", true) { render("Home") }, margin(12, 0))
+            return
+        }
+        val instrumental = resultInstrumentalFile ?: return
+        page.addView(text("STEMIT  /  RESULTS", 11f, colorAccent()).apply {
+            letterSpacing = .08f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        page.addView(heading("Your stems are ready", 27f), margin(8, 6))
+        page.addView(paragraph(String.format(Locale.getDefault(), "Separated %.1f seconds of audio. Your two WAV files are saved in this device's private Library.", resultDurationSeconds)), margin(0, 18))
+        addStemResultCard("Vocals", "The lead vocal separated from the backing track.", vocals)
+        addStemResultCard("Instrumental", "The backing track with the vocal removed.", instrumental)
+        page.addView(button("View Library", true) { render("Library") }, margin(6, 10))
+        page.addView(button("Separate another track") {
+            selectedUri = null
+            selectedName = "No audio selected"
+            render("Home")
+        })
+    }
+
+    private fun addStemResultCard(title: String, description: String, file: File) {
+        val panel = vertical(16)
+        panel.addView(heading(title, 18f))
+        panel.addView(paragraph(description), margin(4, 4))
+        panel.addView(text(android.text.format.Formatter.formatShortFileSize(this, file.length()), 12f, colorMuted()))
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        actions.addView(button("Play", true) { play(file) }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginEnd = dp(6)
+        })
+        actions.addView(button("Share") { share(file) }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginEnd = dp(6)
+        })
+        actions.addView(button("Save") {
+            exportFile = file
+            savePicker.launch(file.name)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        panel.addView(actions, margin(10, 0))
+        page.addView(card(panel), margin(0, 12))
     }
 
     private fun library() {
