@@ -18,9 +18,10 @@ The app keeps the original source file unchanged. There is no account, subscript
 
 Open [GitHub Releases](https://github.com/Augak/Stemit/releases) and choose the latest release.
 
-- **app-debug.apk** is signed by the GitHub Actions debug key and intended for direct installation and testing. Android may ask you to allow installation from the browser or file manager.
-- ***-release-unsigned.apk** files are optimized release builds for the listed CPU architectures. They are unsigned and are not intended for direct installation until signed with the publisher's release key.
-- The Actions → Build Stemit Android APK → Artifacts section also retains the APK bundle for 30 days.
+- Debug APK variants are signed by the GitHub Actions debug key and intended for direct installation and testing.
+- Release APK variants are signed only when the private upload-key secrets are configured; otherwise they are unsigned.
+- `app-release-unsigned.aab` is the unsigned Google Play bundle when no publisher key is configured. With the secrets configured, CI produces `app-release-signed.aab`.
+- The Actions → Build Stemit Android APK → Artifacts section retains the APK and AAB artifacts for 30 days.
 
 For production distribution, follow [RELEASE_SIGNING.md](RELEASE_SIGNING.md) to configure the private upload key, sign the Android App Bundle, and complete the store/privacy checks before publishing.
 
@@ -95,6 +96,7 @@ See [PRIVACY.md](PRIVACY.md) for the privacy summary.
           StemitNavigationSmokeTest.kt
           SeparationEngineIntegrationTest.kt
       PRIVACY.md
+      RELEASE_SIGNING.md
       THIRD_PARTY_NOTICES.md
 
 ## Model and third-party notices
