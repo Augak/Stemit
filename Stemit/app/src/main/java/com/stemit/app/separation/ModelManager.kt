@@ -68,7 +68,7 @@ class ModelManager(private val context: Context) {
         val available = stats.availableBytes
         check(available >= MIN_FREE_BYTES) {
             "Not enough free storage to download the separation model. " +
-                "Stemit needs about 103 MB for the model plus at least 100 MB " +
+                "Stemit needs about 103 MiB for the model plus at least 100 MiB " +
                 "of working space. Free storage and try again."
         }
     }
