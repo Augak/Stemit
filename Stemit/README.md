@@ -22,7 +22,7 @@ Open [GitHub Releases](https://github.com/Augak/Stemit/releases) and choose the 
 - ***-release-unsigned.apk** files are optimized release builds for the listed CPU architectures. They are unsigned and are not intended for direct installation until signed with the publisher's release key.
 - The Actions → Build Stemit Android APK → Artifacts section also retains the APK bundle for 30 days.
 
-For production distribution, protect a publisher signing key, sign the release APKs or Android App Bundle, and verify the model's redistribution licence before publishing.
+For production distribution, follow [RELEASE_SIGNING.md](RELEASE_SIGNING.md) to configure the private upload key, sign the Android App Bundle, and complete the store/privacy checks before publishing.
 
 ## Device and compatibility notes
 
@@ -38,7 +38,7 @@ For production distribution, protect a publisher signing key, sign the release A
 Requirements: JDK 17, Android SDK, and Gradle 8.11.1.
 
     gradle -p Stemit :app:assembleDebug
-    gradle -p Stemit :app:assembleRelease
+    gradle -p Stemit :app:assembleRelease :app:bundleRelease
 
 Install the debug build with Android Debug Bridge:
 
