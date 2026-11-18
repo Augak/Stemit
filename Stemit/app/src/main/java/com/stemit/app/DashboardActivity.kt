@@ -53,6 +53,7 @@ class DashboardActivity : AppCompatActivity() {
     private var progressBar: ProgressBar? = null
     private var progressSpinner: ProgressBar? = null
     private var progressLabel: TextView? = null
+    private var progressPercentLabel: TextView? = null
     private var separateButton: MaterialButton? = null
     private var resultVocalsFile: File? = null
     private var resultInstrumentalFile: File? = null
@@ -254,6 +255,8 @@ class DashboardActivity : AppCompatActivity() {
                 setPadding(dp(8), dp(5), dp(8), dp(4))
                 setOnClickListener { if (!isProcessing) render(name) }
             }
+            item.isEnabled = !isProcessing
+            item.alpha = if (isProcessing) .45f else 1f
             item.addView(ImageView(this).apply {
                 setImageResource(icon)
                 setColorFilter(tint)
@@ -340,6 +343,7 @@ class DashboardActivity : AppCompatActivity() {
                         progressBar?.progress = progressValue
                         progressLabel?.text = progressMessage
                         progressLabel?.contentDescription = progressMessage
+                        progressPercentLabel?.text = "$progressValue%"
                     }
                 }
                 val library = File(filesDir, "library").apply { mkdirs() }
@@ -409,9 +413,10 @@ class DashboardActivity : AppCompatActivity() {
             isIndeterminate = false
         }
         panel.addView(progressBar, margin(0, 6))
-        panel.addView(text("$progressValue%", 13f, colorMuted()).apply {
+        progressPercentLabel = text("$progressValue%", 13f, colorMuted()).apply {
             gravity = Gravity.END
-        })
+        }
+        panel.addView(progressPercentLabel)
         page.addView(card(panel), margin(0, 16))
         page.addView(paragraph("Your original audio is never overwritten. Stems are saved to your private Library only after processing succeeds."))
     }
