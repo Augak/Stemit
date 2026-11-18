@@ -26,7 +26,7 @@ For production distribution, protect a publisher signing key, sign the release A
 
 ## Device and compatibility notes
 
-- Android minimum version: Android 7.0 (API 24).
+- Android minimum version: Android 7.0 (API 24). The app targets Android 16 (API 36) for current Google Play submission requirements.
 - CPU builds: ARM64, ARMv7 and x86_64/universal variants as configured by Gradle.
 - Audio decoding uses Android media codecs and streams decoded PCM to temporary storage.
 - Separation runs inference over fixed-size overlapping audio windows. The complete decoded song is not retained as one large in-memory PCM array.
@@ -35,7 +35,7 @@ For production distribution, protect a publisher signing key, sign the release A
 
 ## Build from source
 
-Requirements: JDK 17, Android SDK, and Gradle 8.2.1.
+Requirements: JDK 17, Android SDK, and Gradle 8.11.1.
 
     gradle -p Stemit :app:assembleDebug
     gradle -p Stemit :app:assembleRelease
