@@ -32,12 +32,31 @@ jobs:
         uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
-      - name: Set up Gradle 8.2.1
+      - name: Set up Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.11.1"
-      - name: Build debug and optimized release APKs
-        run: gradle -p Stemit :app:assembleDebug :app:assembleRelease --stacktrace
+      - name: Prepare optional Play upload key
+        shell: bash
+        env:
+          STEMIT_UPLOAD_KEYSTORE_BASE64: ${{ secrets.STEMIT_UPLOAD_KEYSTORE_BASE64 }}
+          STEMIT_UPLOAD_STORE_PASSWORD: ${{ secrets.STEMIT_UPLOAD_STORE_PASSWORD }}
+          STEMIT_UPLOAD_KEY_ALIAS: ${{ secrets.STEMIT_UPLOAD_KEY_ALIAS }}
+          STEMIT_UPLOAD_KEY_PASSWORD: ${{ secrets.STEMIT_UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [[ -z "${STEMIT_UPLOAD_KEYSTORE_BASE64:-}" ]]; then
+            echo "No upload key configured; release artifacts will be unsigned."
+            exit 0
+          fi
+          printf '%s' "$STEMIT_UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/stemit-upload-key.jks"
+          {
+            echo "STEMIT_UPLOAD_KEYSTORE_PATH=$RUNNER_TEMP/stemit-upload-key.jks"
+            echo "STEMIT_UPLOAD_STORE_PASSWORD=$STEMIT_UPLOAD_STORE_PASSWORD"
+            echo "STEMIT_UPLOAD_KEY_ALIAS=$STEMIT_UPLOAD_KEY_ALIAS"
+            echo "STEMIT_UPLOAD_KEY_PASSWORD=$STEMIT_UPLOAD_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - name: Build debug APK, release APK and Play bundle
+        run: gradle -p Stemit :app:assembleDebug :app:assembleRelease :app:bundleRelease --stacktrace
       - name: Stage APK files
         shell: bash
         run: |
@@ -52,14 +71,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stemit-apk-artifacts
-          path: dist/*.apk
+          path: dist/*
           if-no-files-found: error
           retention-days: 30
 
   publish-preview-release:
     name: Publish GitHub preview release
     needs: build-apks
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'publish Stemit v1.1.1')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, 'publish Stemit v1.2.0')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -72,18 +91,18 @@ jobs:
       - name: Publish versioned preview release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.1.1
-          name: Stemit v1.1.1 Preview
+          tag_name: v1.2.0
+          name: Stemit v1.2.0 Preview
           prerelease: true
           make_latest: false
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: dist/*.apk
+          files: dist/*.apk dist/*.aab
           body: |
-            Stemit v1.1.1 preview release.
+            Stemit v1.2.0 preview release.
 
-            app-debug.apk is signed with the CI debug key and intended for direct device testing.
-            Release APKs are unsigned and require the publisher signing key before installation or store distribution.
-            Physical-device testing, especially on 2 GB RAM phones, remains necessary.
+            Debug APKs are signed with the CI debug key and intended only for device testing.
+            Release APKs and the Android App Bundle are signed only when the private upload-key secrets are configured; otherwise they are unsigned.
+            A signed Android App Bundle is the intended Google Play upload artifact. Physical-device testing, especially on 2 GB RAM phones, remains necessary.
 
 # Preview release is intentionally marked pre-release until physical-device testing is complete.
