@@ -62,8 +62,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          find Stemit/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -exec cp {} dist/ \;
-          find Stemit/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -exec cp {} dist/ \;
+          find Stemit/app/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -exec cp {} dist/ \\;
+          find Stemit/app/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -exec cp {} dist/ \\;
           if [[ -n "${STEMIT_UPLOAD_KEYSTORE_PATH:-}" ]]; then
             cp Stemit/app/build/outputs/bundle/release/app-release.aab dist/app-release-signed.aab
           else
@@ -72,7 +72,7 @@ jobs:
           echo "Build artifacts staged:"
           ls -lh dist/
           test -n "$(find dist -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -s dist/app-release-signed.aab || test -s dist/app-release-unsigned.aab"
+          test -s dist/app-release-signed.aab || test -s dist/app-release-unsigned.aab
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -107,7 +107,7 @@ jobs:
           body: |
             Stemit v1.2.0 preview release.
 
-            Debug APKs are signed with the CI debug key and intended only for device testing.
+            Debug APKs are signed with the GitHub Actions debug key and intended only for device testing.
             Release APKs and the Android App Bundle are signed only when the private upload-key secrets are configured; otherwise they are unsigned.
             A signed Android App Bundle is the intended Google Play upload artifact. Physical-device testing, especially on 2 GB RAM phones, remains necessary.
 
