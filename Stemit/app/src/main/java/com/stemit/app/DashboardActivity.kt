@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
 import android.media.MediaPlayer
 import android.net.Uri
@@ -16,6 +17,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
 import com.google.android.material.button.MaterialButton
@@ -183,6 +188,7 @@ class DashboardActivity : AppCompatActivity() {
             render("Home")
         }, LinearLayout.LayoutParams(-1, -2))
         setContentView(root)
+        applyRootInsets(root)
         applySystemBars()
     }
 
@@ -216,6 +222,7 @@ class DashboardActivity : AppCompatActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(bottomNavigation())
         setContentView(root)
+        applyRootInsets(root)
 
         when (tab) {
             "Home" -> home()
@@ -230,10 +237,28 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun applySystemBars() {
-        window.statusBarColor = colorBackground()
-        window.navigationBarColor = colorSurface()
-        window.decorView.systemUiVisibility = if (isDark()) 0 else
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !isDark()
+            isAppearanceLightNavigationBars = !isDark()
+        }
+    }
+
+    private fun applyRootInsets(root: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val systemBars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(view.paddingLeft, systemBars.top, view.paddingRight, systemBars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun bottomNavigation(): View {
