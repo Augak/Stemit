@@ -187,9 +187,9 @@ class DashboardActivity : AppCompatActivity() {
             prefs.edit().putBoolean("onboarding_complete", true).apply()
             render("Home")
         }, LinearLayout.LayoutParams(-1, -2))
+        applySystemBars()
         setContentView(root)
         applyRootInsets(root)
-        applySystemBars()
     }
 
     private fun render(tab: String) {
