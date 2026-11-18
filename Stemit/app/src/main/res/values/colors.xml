@@ -6,4 +6,5 @@
     <color name="stemit_outline">#E5E6E3</color>
     <color name="stemit_accent">#087F78</color>
     <color name="stemit_primary">#087F78</color>
+    <color name="stemit_icon_background">#087F78</color>
 </resources>
