@@ -58,12 +58,17 @@ class DashboardActivity : AppCompatActivity() {
     private var resultVocalsFile: File? = null
     private var resultInstrumentalFile: File? = null
     private var resultDurationSeconds: Float = 0f
+    private var resultSourceName: String = ""
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             stopPlayback()
             selectedUri = uri
             selectedName = displayName(uri)
+            progressValue = 0
+            progressMessage = "Ready to separate"
+            resultVocalsFile = null
+            resultInstrumentalFile = null
             render("Home")
         }
     }
@@ -381,6 +386,7 @@ class DashboardActivity : AppCompatActivity() {
         resultVocalsFile = vocals
         resultInstrumentalFile = instrumental
         resultDurationSeconds = duration
+        resultSourceName = selectedName
         render("Results")
     }
 
@@ -433,6 +439,7 @@ class DashboardActivity : AppCompatActivity() {
             typeface = Typeface.DEFAULT_BOLD
         })
         page.addView(heading("Your stems are ready", 27f), margin(8, 6))
+        page.addView(paragraph(resultSourceName), margin(0, 4))
         page.addView(paragraph(String.format(Locale.getDefault(), "Separated %.1f seconds of audio. Your two WAV files are saved in this device's private Library.", resultDurationSeconds)), margin(0, 18))
         addStemResultCard("Vocals", "The lead vocal separated from the backing track.", vocals)
         addStemResultCard("Instrumental", "The backing track with the vocal removed.", instrumental)
@@ -440,6 +447,8 @@ class DashboardActivity : AppCompatActivity() {
         page.addView(button("Separate another track") {
             selectedUri = null
             selectedName = "No audio selected"
+            progressValue = 0
+            progressMessage = "Choose a song to begin"
             render("Home")
         })
     }
@@ -754,8 +763,8 @@ class DashboardActivity : AppCompatActivity() {
                     val tag = json.optString("tag_name", "latest")
                     val pageUrl = json.optString("html_url", "https://github.com/Augak/Stemit/releases")
                     runOnUiThread {
-                        if (tag.trimStart('v') == BuildConfig.VERSION_NAME.trimStart('v')) {
-                            showInfo("You're up to date", "Installed version: ${BuildConfig.VERSION_NAME}")
+                        if (compareVersions(tag, BuildConfig.VERSION_NAME) <= 0) {
+                            showInfo("No newer release", "Installed version: ${BuildConfig.VERSION_NAME}\nLatest published version: $tag")
                         } else {
                             MaterialAlertDialogBuilder(this).setTitle("Update available")
                                 .setMessage("A newer version ($tag) is available.")
@@ -770,6 +779,17 @@ class DashboardActivity : AppCompatActivity() {
                 connection?.disconnect()
             }
         }
+    }
+
+    private fun compareVersions(left: String, right: String): Int {
+        val a = left.trimStart('v').substringBefore('-').split('.')
+        val b = right.trimStart('v').substringBefore('-').split('.')
+        for (index in 0 until maxOf(a.size, b.size)) {
+            val av = a.getOrNull(index)?.toIntOrNull() ?: 0
+            val bv = b.getOrNull(index)?.toIntOrNull() ?: 0
+            if (av != bv) return av.compareTo(bv)
+        }
+        return 0
     }
 
     private fun openUrl(url: String) {
