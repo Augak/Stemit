@@ -5,9 +5,9 @@
     <application
         android:name=".StemitApp"
         android:allowBackup="false"
-        android:icon="@drawable/ic_stemit"
+        android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
-        android:roundIcon="@drawable/ic_stemit"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Stemit"
         android:usesCleartextTraffic="false">
