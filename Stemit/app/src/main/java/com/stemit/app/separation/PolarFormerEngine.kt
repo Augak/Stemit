@@ -1,5 +1,6 @@
 package com.stemit.app.separation
 
+import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
 import ai.onnxruntime.OnnxTensor
@@ -30,6 +31,7 @@ class PolarFormerEngine(private val context: Context) {
         private const val FREQ = N_FFT / 2 + 1
         private const val FEATURES = FREQ * 4
         private const val MODEL_INPUT = "stft_features"
+        private const val MIN_AVAILABLE_MEMORY = 192L * 1024L * 1024L
     }
 
     private val modelManager = ModelManager(context)
@@ -66,13 +68,16 @@ class PolarFormerEngine(private val context: Context) {
             val totalSamples = decoder.decodeToPcm16(uri, rawFile, SAMPLE_RATE)
             require(totalSamples > 0L) { "No audio samples could be decoded from this file." }
 
-            val options = OrtSession.SessionOptions().apply {
-                setInterOpNumThreads(1)
-                setIntraOpNumThreads(1)
-                setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
-            }
+            ensureMemoryHeadroom()
+            OrtSession.SessionOptions().use { options ->
+                options.setExecutionMode(OrtSession.SessionOptions.ExecutionMode.SEQUENTIAL)
+                options.setInterOpNumThreads(1)
+                options.setIntraOpNumThreads(1)
+                options.setMemoryPatternOptimization(false)
+                options.setCPUArenaAllocator(false)
+                options.setOptimizationLevel(OrtSession.SessionOptions.OptLevel.BASIC_OPT)
 
-            ortEnv.createSession(modelFile.absolutePath, options).use { session ->
+                ortEnv.createSession(modelFile.absolutePath, options).use { session ->
                 RandomAccessFile(rawFile, "r").use { source ->
                     WavStreamWriter(vocalsFile, totalSamples, SAMPLE_RATE).use { vocalOut ->
                         WavStreamWriter(instrumentalFile, totalSamples, SAMPLE_RATE).use { instrumentalOut ->
@@ -86,11 +91,12 @@ class PolarFormerEngine(private val context: Context) {
                             var lastStart = 0L
                             val inputL = FloatArray(CHUNK)
                             val inputR = FloatArray(CHUNK)
+                            val chunkBytes = ByteArray(CHUNK * 4)
 
                             for (chunkIndex in 0 until chunkCount) {
                                 val start = chunkIndex.toLong() * HALF_CHUNK.toLong()
                                 lastStart = start
-                                readPcmChunk(source, start, totalSamples, inputL, inputR)
+                                readPcmChunk(source, start, totalSamples, inputL, inputR, chunkBytes)
                                 val stems = inferChunk(session, inputL, inputR)
 
                                 if (chunkIndex == 0 && totalSamples <= CHUNK) {
@@ -146,10 +152,11 @@ class PolarFormerEngine(private val context: Context) {
                     }
                 }
             }
+            }
 
             listener.onProgress(SeparationProgress(1f, "Separation complete"))
             return SeparationResult(vocalsFile, instrumentalFile, totalSamples.toFloat() / SAMPLE_RATE.toFloat())
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             vocalsFile.delete()
             instrumentalFile.delete()
             throw e
@@ -158,20 +165,29 @@ class PolarFormerEngine(private val context: Context) {
         }
     }
 
+    private fun ensureMemoryHeadroom() {
+        val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = ActivityManager.MemoryInfo()
+        manager.getMemoryInfo(info)
+        check(!info.lowMemory && info.availMem >= MIN_AVAILABLE_MEMORY) {
+            "Android is reporting low available memory. Close unused apps, restart Stemit, and try again. Your source audio is unchanged."
+        }
+    }
+
     private fun readPcmChunk(
         file: RandomAccessFile,
         start: Long,
         total: Long,
         left: FloatArray,
-        right: FloatArray
+        right: FloatArray,
+        bytes: ByteArray
     ) {
         java.util.Arrays.fill(left, 0f)
         java.util.Arrays.fill(right, 0f)
         val count = min(CHUNK.toLong(), total - start).toInt()
         if (count <= 0) return
         file.seek(start * 4L)
-        val bytes = ByteArray(count * 4)
-        file.readFully(bytes)
+        file.readFully(bytes, 0, count * 4)
         var offset = 0
         for (i in 0 until count) {
             val l = ((bytes[offset].toInt() and 0xff) or ((bytes[offset + 1].toInt() and 0xff) shl 8)).toShort()
@@ -191,14 +207,8 @@ class PolarFormerEngine(private val context: Context) {
         originalR: FloatArray,
         count: Int
     ) {
-        val instrumentalL = FloatArray(count)
-        val instrumentalR = FloatArray(count)
-        for (i in 0 until count) {
-            instrumentalL[i] = (originalL[i] - vocalL[i]).coerceIn(-1f, 1f)
-            instrumentalR[i] = (originalR[i] - vocalR[i]).coerceIn(-1f, 1f)
-        }
         vocals.write(vocalL, vocalR, count)
-        instrumental.write(instrumentalL, instrumentalR, count)
+        instrumental.writeResidual(originalL, originalR, vocalL, vocalR, count)
     }
 
     private fun inferChunk(session: OrtSession, left: FloatArray, right: FloatArray): Pair<FloatArray, FloatArray> {
@@ -268,9 +278,12 @@ class PolarFormerEngine(private val context: Context) {
         val workI = FloatArray(N_FFT)
         val pad = N_FFT / 2
 
+        val acc = FloatArray(paddedLength)
+        val windowNorm = FloatArray(paddedLength)
+
         fun reconstructChannel(channel: Int, target: FloatArray) {
-            val acc = FloatArray(paddedLength)
-            val windowNorm = FloatArray(paddedLength)
+            java.util.Arrays.fill(acc, 0f)
+            java.util.Arrays.fill(windowNorm, 0f)
             for (t in 0 until frames) {
                 java.util.Arrays.fill(workR, 0f)
                 java.util.Arrays.fill(workI, 0f)
@@ -357,6 +370,21 @@ private class WavStreamWriter(
         for (i in 0 until count) {
             writeShort((left[i].coerceIn(-1f, 1f) * 32767f).toInt())
             writeShort((right[i].coerceIn(-1f, 1f) * 32767f).toInt())
+        }
+    }
+
+    fun writeResidual(
+        originalL: FloatArray,
+        originalR: FloatArray,
+        vocalL: FloatArray,
+        vocalR: FloatArray,
+        count: Int
+    ) {
+        require(count <= originalL.size && count <= originalR.size &&
+            count <= vocalL.size && count <= vocalR.size)
+        for (i in 0 until count) {
+            writeShort(((originalL[i] - vocalL[i]).coerceIn(-1f, 1f) * 32767f).toInt())
+            writeShort(((originalR[i] - vocalR[i]).coerceIn(-1f, 1f) * 32767f).toInt())
         }
     }
 
