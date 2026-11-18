@@ -2,12 +2,12 @@
 
 **Stemit** is a focused Android app for separating one audio track into two WAV files: **vocals** and **instrumental**. It is designed as a simple, on-device workflow for Android phones, including entry-level devices.
 
-> **Release status:** v1.1.1 is a preview release. Automated builds and emulator tests are not proof that separation will succeed on every physical phone, especially every 2 GB RAM device.
+> **Release status:** v1.2.0 is a development preview. The low-memory inference path and new processing/results screens are being validated; automated builds are not proof that separation will succeed on every physical phone, especially every 2 GB RAM device.
 
 ## What the app does
 
 1. Select an audio file with Android's system file picker.
-2. Download the separation model on first use (approximately 103 MB).
+2. Download the separation model on first use (approximately 103 MiB).
 3. Separate the track into vocals and instrumental audio on the device.
 4. Preview either stem, then save or share the WAV files.
 5. Find completed stems in the on-device Library.
@@ -44,6 +44,18 @@ Install the debug build with Android Debug Bridge:
 
     adb install -r Stemit/app/build/outputs/apk/debug/app-debug.apk
 
+## Low-memory processing safeguards
+
+- ONNX inference is configured for sequential execution with one intra-op and one inter-op thread.
+- CPU arena allocation and ONNX memory-pattern caching are disabled to reduce retained native-memory pressure.
+- Large PCM read buffers and residual-output buffers are reused or streamed rather than allocated for every chunk.
+- The app checks Android's low-memory signal before creating the ONNX session and stops with an actionable message when the system is already under memory pressure.
+- These safeguards reduce avoidable peak memory but cannot make a 103 MiB neural model safe on every 2 GB phone. Physical-device testing is still required.
+
+## Monetization and publishing readiness
+
+The current preview intentionally has no advertising or payment SDK and does not display fake ad slots or upgrade buttons. Before monetization, configure real publisher-owned ad units, add the required consent and privacy disclosures, and test ad behaviour. Production publishing also requires a publisher signing key, store assets, a final privacy policy/data-safety review, and physical-device verification.
+
 ## Tests
 
 Run the Android instrumentation tests on a running emulator or connected device:
@@ -61,7 +73,7 @@ GitHub Actions runs emulator checks with a 2 GB emulator configuration. This is 
 
 - Audio is selected by the user through Android's system document picker.
 - Selected audio is decoded and processed locally; Stemit's separation code does not upload it to a Stemit server.
-- The model is downloaded from its configured upstream host on first use.
+- The model is downloaded from a pinned Hugging Face revision on first use and verified against a SHA-256 checksum.
 - Saved stems stay in app-private storage until the user saves, shares or deletes them.
 - The optional update check contacts the public GitHub Releases API.
 - Notification permission is optional and requested only when the user enables completion alerts.
