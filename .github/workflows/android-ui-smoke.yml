@@ -33,14 +33,14 @@ jobs:
       - name: Set up Gradle 8.2.1
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: "8.2.1"
+          gradle-version: "8.11.1"
 
       - name: Run Android UI smoke test
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: 36
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader_indirect -memory 2048
           disable-animations: true
-          script: gradle -p Stemit :app:connectedDebugAndroidTest --stacktrace
+          script: sdkmanager "platforms;android-36" "build-tools;36.0.0" && gradle -p Stemit :app:connectedDebugAndroidTest --stacktrace
