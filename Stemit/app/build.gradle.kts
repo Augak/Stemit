@@ -5,11 +5,11 @@ plugins {
 
 android {
     namespace = "com.stemit.app"
-    compileSdk = 34
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.stemit.app"
         minSdk = 24
-        targetSdk = 34
+        targetSdk = 36
         versionCode = 7
         versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
