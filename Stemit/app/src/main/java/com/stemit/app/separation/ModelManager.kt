@@ -6,6 +6,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 /**
  * Downloads the licensed MIT BS PolarFormer ONNX model once and keeps it locally.
@@ -14,18 +15,49 @@ import java.net.URL
 class ModelManager(private val context: Context) {
     companion object {
         const val MODEL_NAME = "bs_polarformer_fp16.onnx"
-        const val MODEL_BYTES = 103_000_000L
+        const val MODEL_BYTES = 108_000_000L
+        const val MODEL_SHA256 = "76424289ea586bae4bbdb289383b0269b099416471e2b05068d02aa0b0c01467"
         private const val MIN_FREE_BYTES = MODEL_BYTES + 100L * 1024L * 1024L
         const val MODEL_URL =
-            "https://huggingface.co/bgkb/bs_polarformer/resolve/main/bs_polarformer_fp16.onnx?download=true"
+            "https://huggingface.co/bgkb/bs_polarformer/resolve/9158719ee2173edd480a735764627526506fe4af/bs_polarformer_fp16.onnx?download=true"
     }
 
     private val modelDir = File(context.filesDir, "models").apply { mkdirs() }
     val modelFile: File get() = File(modelDir, MODEL_NAME)
+    private val verifiedMarker = File(modelDir, "$MODEL_NAME.sha256")
 
-    fun isInstalled(): Boolean = modelFile.exists() && modelFile.length() > 50_000_000L
+    fun isInstalled(): Boolean =
+        modelFile.exists() && modelFile.length() > 50_000_000L &&
+            verifiedMarker.exists() && verifiedMarker.readText().trim().equals(MODEL_SHA256, ignoreCase = true)
 
-    fun deleteInstalled(): Boolean = !modelFile.exists() || modelFile.delete()
+    fun deleteInstalled(): Boolean {
+        val modelRemoved = !modelFile.exists() || modelFile.delete()
+        verifiedMarker.delete()
+        return modelRemoved
+    }
+
+    private fun sha256(file: File): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        file.inputStream().buffered(256 * 1024).use { input ->
+            val buffer = ByteArray(256 * 1024)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                if (count > 0) digest.update(buffer, 0, count)
+            }
+        }
+        return digest.digest().joinToString("") { byte ->
+            "%02x".format(byte.toInt() and 0xff)
+        }
+    }
+
+    private fun markVerified() {
+        try {
+            verifiedMarker.writeText(MODEL_SHA256)
+        } catch (_: Exception) {
+            // The model remains valid; a future launch can verify it again.
+        }
+    }
 
     /**
      * Fail early with an actionable message instead of filling the user's
@@ -43,6 +75,14 @@ class ModelManager(private val context: Context) {
 
     fun ensureInstalled(progress: (Float) -> Unit = {}): File {
         if (isInstalled()) return modelFile
+        if (modelFile.exists() && modelFile.length() > 50_000_000L) {
+            if (sha256(modelFile).equals(MODEL_SHA256, ignoreCase = true)) {
+                markVerified()
+                return modelFile
+            }
+            modelFile.delete()
+            verifiedMarker.delete()
+        }
         requireDownloadSpace()
 
         val temp = File(modelDir, "$MODEL_NAME.part")
@@ -77,6 +117,10 @@ class ModelManager(private val context: Context) {
             if (temp.length() < 50_000_000L) {
                 throw IllegalStateException("Downloaded model is incomplete (${temp.length()} bytes).")
             }
+            val actualSha256 = sha256(temp)
+            if (!actualSha256.equals(MODEL_SHA256, ignoreCase = true)) {
+                throw IllegalStateException("The downloaded model failed its SHA-256 integrity check. Please retry on a stable connection.")
+            }
             if (modelFile.exists() && !modelFile.delete()) {
                 throw IllegalStateException("Unable to replace the old model file.")
             }
@@ -84,6 +128,7 @@ class ModelManager(private val context: Context) {
                 temp.copyTo(modelFile, overwrite = true)
                 if (!temp.delete()) temp.deleteOnExit()
             }
+            markVerified()
             completed = true
             return modelFile
         } finally {
