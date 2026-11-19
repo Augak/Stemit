@@ -3,19 +3,37 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val uploadKeystorePath = System.getenv("STEMIT_UPLOAD_KEYSTORE_PATH")
+val uploadStorePassword = System.getenv("STEMIT_UPLOAD_STORE_PASSWORD")
+val uploadKeyAlias = System.getenv("STEMIT_UPLOAD_KEY_ALIAS")
+val uploadKeyPassword = System.getenv("STEMIT_UPLOAD_KEY_PASSWORD")
+
 android {
     namespace = "com.stemit.app"
-    compileSdk = 34
+    signingConfigs {
+        create("release") {
+            if (!uploadKeystorePath.isNullOrBlank()) {
+                storeFile = file(uploadKeystorePath)
+                storePassword = uploadStorePassword
+                keyAlias = uploadKeyAlias
+                keyPassword = uploadKeyPassword
+            }
+        }
+    }
+    compileSdk = 36
     defaultConfig {
         applicationId = "com.stemit.app"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 6
-        versionName = "1.1.1"
+        targetSdk = 36
+        versionCode = 7
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {
         release {
+            if (!uploadKeystorePath.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.Color
 import android.graphics.Typeface
 import android.media.MediaPlayer
 import android.net.Uri
@@ -16,6 +17,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.content.FileProvider
 import androidx.core.app.NotificationCompat
 import com.google.android.material.button.MaterialButton
@@ -51,14 +56,24 @@ class DashboardActivity : AppCompatActivity() {
     private var activeTab = "Home"
     private lateinit var page: LinearLayout
     private var progressBar: ProgressBar? = null
+    private var progressSpinner: ProgressBar? = null
     private var progressLabel: TextView? = null
+    private var progressPercentLabel: TextView? = null
     private var separateButton: MaterialButton? = null
+    private var resultVocalsFile: File? = null
+    private var resultInstrumentalFile: File? = null
+    private var resultDurationSeconds: Float = 0f
+    private var resultSourceName: String = ""
 
     private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             stopPlayback()
             selectedUri = uri
             selectedName = displayName(uri)
+            progressValue = 0
+            progressMessage = "Ready to separate"
+            resultVocalsFile = null
+            resultInstrumentalFile = null
             render("Home")
         }
     }
@@ -88,13 +103,13 @@ class DashboardActivity : AppCompatActivity() {
         if (!prefs.getBoolean("onboarding_complete", false)) showWelcome() else render("Home")
     }
 
-    private fun isDark() = prefs.getBoolean("dark_theme", false)
-    private fun colorBackground() = if (isDark()) 0xFF101114.toInt() else 0xFFF6F6F4.toInt()
-    private fun colorSurface() = if (isDark()) 0xFF1B1D21.toInt() else 0xFFFFFFFF.toInt()
-    private fun colorText() = if (isDark()) 0xFFF5F5F2.toInt() else 0xFF191A1C.toInt()
-    private fun colorMuted() = if (isDark()) 0xFFADB1B8.toInt() else 0xFF6B7077.toInt()
-    private fun colorAccent() = if (isDark()) 0xFF8FD9D1.toInt() else 0xFF087F78.toInt()
-    private fun colorBorder() = if (isDark()) 0xFF30343A.toInt() else 0xFFE5E6E3.toInt()
+    private fun isDark() = prefs.getBoolean("dark_theme", true)
+    private fun colorBackground() = if (isDark()) 0xFF121116.toInt() else 0xFFF6F5FA.toInt()
+    private fun colorSurface() = if (isDark()) 0xFF0D0C12.toInt() else 0xFFFFFFFF.toInt()
+    private fun colorText() = if (isDark()) 0xFFF5F2FF.toInt() else 0xFF191622.toInt()
+    private fun colorMuted() = if (isDark()) 0xFFA7A1B5.toInt() else 0xFF706B7B.toInt()
+    private fun colorAccent() = if (isDark()) 0xFF927BFA.toInt() else 0xFF7058D8.toInt()
+    private fun colorBorder() = if (isDark()) 0xFF302B3B.toInt() else 0xFFE6E1F0.toInt()
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun text(value: String, size: Float = 14f, color: Int = colorText()) = TextView(this).apply {
@@ -163,7 +178,7 @@ class DashboardActivity : AppCompatActivity() {
             gravity = Gravity.CENTER
             textAlignment = View.TEXT_ALIGNMENT_CENTER
         })
-        root.addView(paragraph("The first use downloads the separation model (about 103 MB). Your selected audio is processed on this device.").apply {
+        root.addView(paragraph("The first use downloads the separation model (about 103 MiB). Your selected audio is processed on this device.").apply {
             gravity = Gravity.CENTER
             textAlignment = View.TEXT_ALIGNMENT_CENTER
             setPadding(0, dp(12), 0, dp(22))
@@ -172,8 +187,9 @@ class DashboardActivity : AppCompatActivity() {
             prefs.edit().putBoolean("onboarding_complete", true).apply()
             render("Home")
         }, LinearLayout.LayoutParams(-1, -2))
-        setContentView(root)
         applySystemBars()
+        setContentView(root)
+        applyRootInsets(root)
     }
 
     private fun render(tab: String) {
@@ -206,11 +222,14 @@ class DashboardActivity : AppCompatActivity() {
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(bottomNavigation())
         setContentView(root)
+        applyRootInsets(root)
 
         when (tab) {
             "Home" -> home()
             "Library" -> library()
             "Settings" -> settings()
+            "Processing" -> processingScreen()
+            "Results" -> resultsScreen()
         }
         page.alpha = 0f
         page.translationY = dp(5).toFloat()
@@ -218,10 +237,28 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun applySystemBars() {
-        window.statusBarColor = colorBackground()
-        window.navigationBarColor = colorSurface()
-        window.decorView.systemUiVisibility = if (isDark()) 0 else
-            View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        window.statusBarColor = Color.TRANSPARENT
+        window.navigationBarColor = Color.TRANSPARENT
+        if (Build.VERSION.SDK_INT >= 29) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = !isDark()
+            isAppearanceLightNavigationBars = !isDark()
+        }
+    }
+
+    private fun applyRootInsets(root: View) {
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val systemBars = insets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(view.paddingLeft, systemBars.top, view.paddingRight, systemBars.bottom)
+            insets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
 
     private fun bottomNavigation(): View {
@@ -246,8 +283,10 @@ class DashboardActivity : AppCompatActivity() {
                 isFocusable = true
                 contentDescription = description
                 setPadding(dp(8), dp(5), dp(8), dp(4))
-                setOnClickListener { if (!isProcessing || name == "Home") render(name) }
+                setOnClickListener { if (!isProcessing) render(name) }
             }
+            item.isEnabled = !isProcessing
+            item.alpha = if (isProcessing) .45f else 1f
             item.addView(ImageView(this).apply {
                 setImageResource(icon)
                 setColorFilter(tint)
@@ -308,7 +347,7 @@ class DashboardActivity : AppCompatActivity() {
         val modelText = if (engine.modelInstalled()) {
             "Model downloaded · Ready for on-device processing"
         } else {
-            "First use downloads the separation model (about 103 MB)"
+            "First use downloads the separation model (about 103 MiB)"
         }
         page.addView(paragraph(modelText).apply {
             textSize = 12f
@@ -322,11 +361,7 @@ class DashboardActivity : AppCompatActivity() {
         isProcessing = true
         progressValue = 0
         progressMessage = "Preparing audio…"
-        progressBar?.visibility = View.VISIBLE
-        progressBar?.progress = 0
-        progressLabel?.text = progressMessage
-        separateButton?.isEnabled = false
-        separateButton?.text = "Separating…"
+        render("Processing")
 
         worker.execute {
             try {
@@ -337,6 +372,8 @@ class DashboardActivity : AppCompatActivity() {
                         progressMessage = update.message
                         progressBar?.progress = progressValue
                         progressLabel?.text = progressMessage
+                        progressLabel?.contentDescription = progressMessage
+                        progressPercentLabel?.text = "$progressValue%"
                     }
                 }
                 val library = File(filesDir, "library").apply { mkdirs() }
@@ -349,10 +386,6 @@ class DashboardActivity : AppCompatActivity() {
                     isProcessing = false
                     progressValue = 100
                     progressMessage = "Separation complete"
-                    progressBar?.progress = 100
-                    progressLabel?.text = progressMessage
-                    separateButton?.isEnabled = selectedUri != null
-                    separateButton?.text = "Separate audio"
                     showResults(vocals, instrumental, result.durationSeconds)
                     sendCompletionNotification(vocals, instrumental)
                 }
@@ -360,38 +393,112 @@ class DashboardActivity : AppCompatActivity() {
                 runOnUiThread {
                     isProcessing = false
                     progressMessage = "This device ran out of memory before the separation finished."
-                    resetProcessingControls()
-                    showInfo("Separation stopped", "Stemit could not complete this file with the memory available. Your original audio has not been changed.")
+                    render("Home")
+                    showInfo("Separation stopped", "Stemit stopped before saving incomplete stems. Close other apps, restart your phone, and try a shorter audio file. Your original audio is unchanged.")
                 }
             } catch (e: Exception) {
                 runOnUiThread {
                     isProcessing = false
                     progressMessage = "Separation failed"
-                    resetProcessingControls()
+                    render("Home")
                     showInfo("Could not separate this track", e.message ?: e.javaClass.simpleName)
                 }
             }
         }
     }
 
-    private fun resetProcessingControls() {
-        progressLabel?.text = progressMessage
-        progressBar?.visibility = View.GONE
-        separateButton?.isEnabled = selectedUri != null
-        separateButton?.text = "Separate audio"
+    private fun showResults(vocals: File, instrumental: File, duration: Float) {
+        resultVocalsFile = vocals
+        resultInstrumentalFile = instrumental
+        resultDurationSeconds = duration
+        resultSourceName = selectedName
+        render("Results")
     }
 
-    private fun showResults(vocals: File, instrumental: File, duration: Float) {
-        val content = vertical(18)
-        content.addView(paragraph(String.format(Locale.getDefault(), "Processed %.1f seconds of audio.", duration)))
-        content.addView(button("Play vocals", true) { play(vocals) })
-        content.addView(button("Play instrumental") { play(instrumental) }, margin(8, 0))
-        content.addView(button("Open Library") { render("Library") }, margin(8, 0))
-        MaterialAlertDialogBuilder(this)
-            .setTitle("Your stems are ready")
-            .setView(content)
-            .setPositiveButton("Done", null)
-            .show()
+    private fun processingScreen() {
+        page.addView(text("STEMIT  /  PROCESSING", 11f, colorAccent()).apply {
+            letterSpacing = .08f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        page.addView(heading("Creating your stems", 27f), margin(8, 6))
+        page.addView(paragraph("Keep Stemit open while the model separates the vocal and instrumental tracks."), margin(0, 20))
+
+        val panel = vertical(20)
+        progressSpinner = ProgressBar(this).apply {
+            isIndeterminate = true
+            contentDescription = "Audio separation is running"
+        }
+        panel.addView(progressSpinner, LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+            gravity = Gravity.CENTER_HORIZONTAL
+        })
+        progressLabel = paragraph(progressMessage).apply {
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            contentDescription = progressMessage
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        }
+        panel.addView(progressLabel, margin(10, 8))
+        progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 100
+            progress = progressValue
+            isIndeterminate = false
+        }
+        panel.addView(progressBar, margin(0, 6))
+        progressPercentLabel = text("$progressValue%", 13f, colorMuted()).apply {
+            gravity = Gravity.END
+        }
+        panel.addView(progressPercentLabel)
+        page.addView(card(panel), margin(0, 16))
+        page.addView(paragraph("Your original audio is never overwritten. Stems are saved to your private Library only after processing succeeds."))
+    }
+
+    private fun resultsScreen() {
+        val vocals = resultVocalsFile ?: run {
+            page.addView(heading("No results yet", 22f))
+            page.addView(button("Back to Home", true) { render("Home") }, margin(12, 0))
+            return
+        }
+        val instrumental = resultInstrumentalFile ?: return
+        page.addView(text("STEMIT  /  RESULTS", 11f, colorAccent()).apply {
+            letterSpacing = .08f
+            typeface = Typeface.DEFAULT_BOLD
+        })
+        page.addView(heading("Your stems are ready", 27f), margin(8, 6))
+        page.addView(paragraph(resultSourceName), margin(0, 4))
+        page.addView(paragraph(String.format(Locale.getDefault(), "Separated %.1f seconds of audio. Your two WAV files are saved in this device's private Library.", resultDurationSeconds)), margin(0, 18))
+        addStemResultCard("Vocals", "The lead vocal separated from the backing track.", vocals)
+        addStemResultCard("Instrumental", "The backing track with the vocal removed.", instrumental)
+        page.addView(button("View Library", true) { render("Library") }, margin(6, 10))
+        page.addView(button("Separate another track") {
+            selectedUri = null
+            selectedName = "No audio selected"
+            progressValue = 0
+            progressMessage = "Choose a song to begin"
+            render("Home")
+        })
+    }
+
+    private fun addStemResultCard(title: String, description: String, file: File) {
+        val panel = vertical(16)
+        panel.addView(heading(title, 18f))
+        panel.addView(paragraph(description), margin(4, 4))
+        panel.addView(text(android.text.format.Formatter.formatShortFileSize(this, file.length()), 12f, colorMuted()))
+        val actions = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        actions.addView(button("Play", true) { play(file) }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginEnd = dp(6)
+        })
+        actions.addView(button("Share") { share(file) }, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginEnd = dp(6)
+        })
+        actions.addView(button("Save") {
+            exportFile = file
+            savePicker.launch(file.name)
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        panel.addView(actions, margin(10, 0))
+        page.addView(card(panel), margin(0, 12))
     }
 
     private fun library() {
@@ -681,8 +788,8 @@ class DashboardActivity : AppCompatActivity() {
                     val tag = json.optString("tag_name", "latest")
                     val pageUrl = json.optString("html_url", "https://github.com/Augak/Stemit/releases")
                     runOnUiThread {
-                        if (tag.trimStart('v') == BuildConfig.VERSION_NAME.trimStart('v')) {
-                            showInfo("You're up to date", "Installed version: ${BuildConfig.VERSION_NAME}")
+                        if (compareVersions(tag, BuildConfig.VERSION_NAME) <= 0) {
+                            showInfo("No newer release", "Installed version: ${BuildConfig.VERSION_NAME}\nLatest published version: $tag")
                         } else {
                             MaterialAlertDialogBuilder(this).setTitle("Update available")
                                 .setMessage("A newer version ($tag) is available.")
@@ -697,6 +804,17 @@ class DashboardActivity : AppCompatActivity() {
                 connection?.disconnect()
             }
         }
+    }
+
+    private fun compareVersions(left: String, right: String): Int {
+        val a = left.trimStart('v').substringBefore('-').split('.')
+        val b = right.trimStart('v').substringBefore('-').split('.')
+        for (index in 0 until maxOf(a.size, b.size)) {
+            val av = a.getOrNull(index)?.toIntOrNull() ?: 0
+            val bv = b.getOrNull(index)?.toIntOrNull() ?: 0
+            if (av != bv) return av.compareTo(bv)
+        }
+        return 0
     }
 
     private fun openUrl(url: String) {
