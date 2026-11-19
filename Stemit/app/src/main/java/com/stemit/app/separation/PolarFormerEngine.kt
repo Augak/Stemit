@@ -212,7 +212,8 @@ class PolarFormerEngine(private val context: Context) {
     }
 
     private fun inferChunk(session: OrtSession, left: FloatArray, right: FloatArray): Pair<FloatArray, FloatArray> {
-        val frames = CHUNK / HOP + 1
+        // Match the upstream model's non-centred STFT contract: 253 frames for 131072 samples.
+        val frames = (CHUNK - N_FFT) / HOP + 1
         val stft = FloatArray(2 * FREQ * frames * 2)
         computeStft(left, 0, stft, frames)
         computeStft(right, 1, stft, frames)
@@ -255,7 +256,7 @@ class PolarFormerEngine(private val context: Context) {
         val real = FloatArray(N_FFT)
         val imag = FloatArray(N_FFT)
         for (t in 0 until frames) {
-            val frameStart = t * HOP - pad
+            val frameStart = t * HOP
             for (n in 0 until N_FFT) {
                 val sourceIndex = reflectIndex(frameStart + n, source.size)
                 real[n] = source[sourceIndex] * hann[n]
@@ -271,13 +272,11 @@ class PolarFormerEngine(private val context: Context) {
     }
 
     private fun reconstruct(stft: FloatArray, mask: FloatArray, frames: Int): Pair<FloatArray, FloatArray> {
-        val paddedLength = CHUNK + N_FFT
+        val paddedLength = CHUNK
         val left = FloatArray(CHUNK)
         val right = FloatArray(CHUNK)
         val workR = FloatArray(N_FFT)
         val workI = FloatArray(N_FFT)
-        val pad = N_FFT / 2
-
         val acc = FloatArray(paddedLength)
         val windowNorm = FloatArray(paddedLength)
 
@@ -318,7 +317,7 @@ class PolarFormerEngine(private val context: Context) {
                 }
             }
             for (i in 0 until CHUNK) {
-                val position = i + pad
+                val position = i
                 target[i] = if (position < acc.size && windowNorm[position] > 1e-8f) {
                     acc[position] / windowNorm[position]
                 } else 0f
