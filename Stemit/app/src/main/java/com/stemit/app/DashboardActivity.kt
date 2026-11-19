@@ -103,7 +103,7 @@ class DashboardActivity : AppCompatActivity() {
         if (!prefs.getBoolean("onboarding_complete", false)) showWelcome() else render("Home")
     }
 
-    private fun isDark() = prefs.getBoolean("dark_theme", false)
+    private fun isDark() = prefs.getBoolean("dark_theme", true)
     private fun colorBackground() = if (isDark()) 0xFF121116.toInt() else 0xFFF6F5FA.toInt()
     private fun colorSurface() = if (isDark()) 0xFF0D0C12.toInt() else 0xFFFFFFFF.toInt()
     private fun colorText() = if (isDark()) 0xFFF5F2FF.toInt() else 0xFF191622.toInt()
