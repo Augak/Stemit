@@ -104,12 +104,12 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun isDark() = prefs.getBoolean("dark_theme", false)
-    private fun colorBackground() = if (isDark()) 0xFF101114.toInt() else 0xFFF6F6F4.toInt()
-    private fun colorSurface() = if (isDark()) 0xFF1B1D21.toInt() else 0xFFFFFFFF.toInt()
-    private fun colorText() = if (isDark()) 0xFFF5F5F2.toInt() else 0xFF191A1C.toInt()
-    private fun colorMuted() = if (isDark()) 0xFFADB1B8.toInt() else 0xFF6B7077.toInt()
-    private fun colorAccent() = if (isDark()) 0xFF8FD9D1.toInt() else 0xFF087F78.toInt()
-    private fun colorBorder() = if (isDark()) 0xFF30343A.toInt() else 0xFFE5E6E3.toInt()
+    private fun colorBackground() = if (isDark()) 0xFF121116.toInt() else 0xFFF6F5FA.toInt()
+    private fun colorSurface() = if (isDark()) 0xFF0D0C12.toInt() else 0xFFFFFFFF.toInt()
+    private fun colorText() = if (isDark()) 0xFFF5F2FF.toInt() else 0xFF191622.toInt()
+    private fun colorMuted() = if (isDark()) 0xFFA7A1B5.toInt() else 0xFF706B7B.toInt()
+    private fun colorAccent() = if (isDark()) 0xFF927BFA.toInt() else 0xFF7058D8.toInt()
+    private fun colorBorder() = if (isDark()) 0xFF302B3B.toInt() else 0xFFE6E1F0.toInt()
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
 
     private fun text(value: String, size: Float = 14f, color: Int = colorText()) = TextView(this).apply {
